@@ -10,9 +10,9 @@
 
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-const CONFIG = {
-  supabaseUrl: 'https://rxhjinknzuylsmxpjtkl.supabase.co',
-  supabasePublishableKey: 'sb_publishable_18xCFx2a9J0pP4n0LOu5lw_W56aXL35',
+const CONFIG = { 
+  supabaseUrl: 'https://rxhjinknzuylsmxpjtkl.supabase.co', 
+  supabasePublishableKey: 'sb_publishable_18xCFx2a9J0pP4n0LOu5lw_W56aXL35', 
 };
 
 const isConfigured = !CONFIG.supabaseUrl.includes('PASTE_') && !CONFIG.supabasePublishableKey.includes('PASTE_');
@@ -42,6 +42,7 @@ const state = {
   confirmAction: null,
   profilePhotoFile: null,
   isLoading: false,
+  liveRun: { running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '' },
 };
 
 const TYPE_STYLES = {
@@ -55,16 +56,25 @@ const TYPE_STYLES = {
   Other: ['rgba(255,255,255,.09)', 'var(--muted)'],
 };
 
-const ACHIEVEMENTS = [
-  { id: 'first-run', icon: 'footprints', title: 'First step', copy: 'Log your first run', unlocked: (s) => s.totalRuns >= 1 },
-  { id: 'ten-runs', icon: 'layers-3', title: 'Showing up', copy: 'Complete 10 runs', unlocked: (s) => s.totalRuns >= 10 },
-  { id: 'fifty-k', icon: 'map', title: '50 km club', copy: 'Run 50 km total', unlocked: (s) => s.totalDistance >= 50 },
-  { id: 'hundred-k', icon: 'milestone', title: 'Century', copy: 'Run 100 km total', unlocked: (s) => s.totalDistance >= 100 },
-  { id: 'streak-7', icon: 'flame', title: 'On fire', copy: 'Reach a 7-day streak', unlocked: (s) => s.streak >= 7 },
-  { id: 'long-10', icon: 'mountain', title: 'Double digits', copy: 'Log a 10 km run', unlocked: (s) => s.longestRun >= 10 },
-  { id: 'half', icon: 'trophy', title: 'Half way there', copy: 'Log a half marathon', unlocked: (s) => s.longestRun >= 21.0975 },
-  { id: 'early-bird', icon: 'sunrise', title: 'Early volume', copy: 'Run 25 km this week', unlocked: (s) => s.weeklyDistance >= 25 },
-];
+function getAchievements() {
+  const metric = getDistanceUnit() === 'km';
+  const totalTarget = metric ? 80.4672 : 50;
+  const centuryTarget = metric ? 160.9344 : 100;
+  const longTarget = metric ? 16.09344 : 10;
+  const weeklyTarget = metric ? 40.2336 : 25;
+  const toKm = value => displayToKm(value, metric ? 'km' : 'mi');
+  const text = value => `${Number(value.toFixed(metric ? 1 : 0))} ${metric ? 'km' : 'mi'}`;
+  return [
+    { id: 'first-run', icon: 'footprints', title: 'First step', copy: 'Log your first run', unlocked: (s) => s.totalRuns >= 1 },
+    { id: 'ten-runs', icon: 'layers-3', title: 'Showing up', copy: 'Complete 10 runs', unlocked: (s) => s.totalRuns >= 10 },
+    { id: 'fifty-distance', icon: 'map', title: `${text(totalTarget)} club`, copy: `Run ${text(totalTarget)} total`, unlocked: (s) => s.totalDistance >= toKm(totalTarget) },
+    { id: 'hundred-distance', icon: 'milestone', title: 'Century', copy: `Run ${text(centuryTarget)} total`, unlocked: (s) => s.totalDistance >= toKm(centuryTarget) },
+    { id: 'streak-7', icon: 'flame', title: 'On fire', copy: 'Reach a 7-day streak', unlocked: (s) => s.streak >= 7 },
+    { id: 'long-distance', icon: 'mountain', title: 'Double digits', copy: `Log a ${text(longTarget)} run`, unlocked: (s) => s.longestRun >= toKm(longTarget) },
+    { id: 'half', icon: 'trophy', title: 'Half way there', copy: 'Log a half marathon', unlocked: (s) => s.longestRun >= 21.0975 },
+    { id: 'weekly-volume', icon: 'sunrise', title: 'Early volume', copy: `Run ${text(weeklyTarget)} this week`, unlocked: (s) => s.weeklyDistance >= toKm(weeklyTarget) },
+  ];
+}
 
 function initIcons() {
   if (window.lucide) window.lucide.createIcons({ attrs: { 'stroke-width': 1.8 } });
@@ -97,6 +107,43 @@ function escapeHTML(value = '') {
   return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
 }
 function initials(name = '') { return name.trim().split(/\s+/).map(word => word[0]).join('').slice(0, 2).toUpperCase() || 'R'; }
+// Canonical cloud storage: kilometers and meters. Users can switch display/entry units
+// without rewriting existing runs, goals, PRs, or shared data.
+const KM_PER_MILE = 1.609344;
+const METERS_PER_FOOT = 0.3048;
+function kmToMiles(km) { return Number(km || 0) / KM_PER_MILE; }
+function milesToKm(miles) { return Number(miles || 0) * KM_PER_MILE; }
+function getDistanceUnit() { return state.profile?.settings?.distance_unit === 'km' ? 'km' : 'mi'; }
+function unitLabel(unit = getDistanceUnit()) { return unit === 'km' ? 'km' : 'mi'; }
+function paceUnitLabel(unit = getDistanceUnit()) { return unit === 'km' ? '/km' : '/mi'; }
+function elevationUnitLabel(unit = getDistanceUnit()) { return unit === 'km' ? 'm' : 'ft'; }
+function kmToDisplay(km, unit = getDistanceUnit()) { return unit === 'km' ? Number(km || 0) : kmToMiles(km); }
+function displayToKm(distance, unit = getDistanceUnit()) { return unit === 'km' ? Number(distance || 0) : milesToKm(distance); }
+function metersToDisplay(meters, unit = getDistanceUnit()) { return unit === 'km' ? Number(meters || 0) : Number(meters || 0) / METERS_PER_FOOT; }
+function displayToMeters(value, unit = getDistanceUnit()) { return unit === 'km' ? Number(value || 0) : Number(value || 0) * METERS_PER_FOOT; }
+function formatUnitInput(km, digits = 2) { return Number(kmToDisplay(km).toFixed(digits)); }
+function formatElevationInput(meters, digits = 0) { return Number(metersToDisplay(meters).toFixed(digits)); }
+function formatDistance(km, digits = 2, unit = getDistanceUnit()) { return `${kmToDisplay(km, unit).toFixed(digits)} ${unitLabel(unit)}`; }
+function formatDistanceValue(km, digits = 2, unit = getDistanceUnit()) { return kmToDisplay(km, unit).toFixed(digits); }
+function formatElevation(meters, digits = 0, unit = getDistanceUnit()) { return `${metersToDisplay(meters, unit).toLocaleString(undefined, { maximumFractionDigits: digits })} ${elevationUnitLabel(unit)}`; }
+function distanceInputToCanonical(input) {
+  if (input?.dataset?.canonicalKm && input.value === input.dataset.renderedValue) return Number(input.dataset.canonicalKm);
+  return round(displayToKm(Number(input?.value || 0)), 6);
+}
+function elevationInputToCanonical(input) {
+  if (input?.dataset?.canonicalM && input.value === input.dataset.renderedValue) return Number(input.dataset.canonicalM);
+  return round(Math.max(0, displayToMeters(Number(input?.value || 0))), 3);
+}
+function setDistanceInputFromCanonical(input, distanceKm, digits = 6) {
+  if (!input) return;
+  const value = String(formatUnitInput(distanceKm, digits));
+  input.value = value; input.dataset.canonicalKm = String(distanceKm); input.dataset.renderedValue = value;
+}
+function setElevationInputFromCanonical(input, elevationM, digits = 3) {
+  if (!input) return;
+  const value = String(formatElevationInput(elevationM, digits));
+  input.value = value; input.dataset.canonicalM = String(elevationM); input.dataset.renderedValue = value;
+}
 function normalizeRun(run) {
   return {
     ...run,
@@ -106,8 +153,6 @@ function normalizeRun(run) {
     calories: Number(run.calories || 0),
   };
 }
-function formatDistance(km, digits = 2) { return `${Number(km || 0).toFixed(digits)} km`; }
-function formatDistanceValue(km, digits = 2) { return Number(km || 0).toFixed(digits); }
 function formatDuration(seconds) {
   seconds = Math.max(0, Math.round(Number(seconds || 0)));
   const h = Math.floor(seconds / 3600);
@@ -122,14 +167,22 @@ function formatDurationShort(seconds) {
   if (h) return `${h}h ${m}m`;
   return `${m}m ${seconds % 60}s`;
 }
-function formatPace(secondsPerKm) {
-  if (!Number.isFinite(secondsPerKm) || secondsPerKm <= 0) return '—';
-  const total = Math.round(secondsPerKm);
+function formatPace(secondsPerUnit, unit = getDistanceUnit()) {
+  if (!Number.isFinite(secondsPerUnit) || secondsPerUnit <= 0) return '—';
+  const total = Math.round(secondsPerUnit);
   const m = Math.floor(total / 60);
   const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')} /km`;
+  return `${m}:${String(s).padStart(2, '0')} ${paceUnitLabel(unit)}`;
 }
-function getPace(run) { return run?.distance_km > 0 ? Number(run.duration_seconds) / Number(run.distance_km) : Infinity; }
+function formatPaceValue(secondsPerUnit, unit = getDistanceUnit()) { return formatPace(secondsPerUnit, unit).replace(` ${paceUnitLabel(unit)}`, ''); }
+function getPace(run, unit = getDistanceUnit()) {
+  const distance = kmToDisplay(run?.distance_km || 0, unit);
+  return distance > 0 ? Number(run.duration_seconds) / distance : Infinity;
+}
+function getCanonicalPacePerKm(run) {
+  const km = Number(run?.distance_km || 0);
+  return km > 0 ? Number(run.duration_seconds) / km : Infinity;
+}
 function formatDate(iso, options = { month: 'short', day: 'numeric', year: 'numeric' }) {
   return localDate(iso).toLocaleDateString(undefined, options);
 }
@@ -177,7 +230,7 @@ function getStats(runs = state.runs) {
     totalTime,
     totalElevation,
     totalRuns,
-    avgPace: totalDistance > 0 ? totalTime / totalDistance : Infinity,
+    avgPace: totalDistance > 0 ? totalTime / kmToDisplay(totalDistance) : Infinity,
     fastestPace: fastest ? getPace(fastest) : Infinity,
     longestRun: longest?.distance_km || 0,
     longest,
@@ -205,19 +258,27 @@ function currentStreak(runs) {
 
 function getPRs(runs = state.runs) {
   const clean = [...runs].filter(run => run.distance_km > 0 && run.duration_seconds > 0);
-  const fastestFor = (distance) => clean.filter(run => run.distance_km >= distance).sort((a, b) => getPace(a) - getPace(b))[0] || null;
-  const longest = clean.sort((a, b) => b.distance_km - a.distance_km)[0] || null;
-  const fastest = clean.sort((a, b) => getPace(a) - getPace(b))[0] || null;
-  const standards = [
-    { id: '1k', label: 'Fastest 1 km', target: 1 },
-    { id: '5k', label: 'Fastest 5 km', target: 5 },
-    { id: '10k', label: 'Fastest 10 km', target: 10 },
-    { id: 'half', label: 'Half marathon', target: 21.0975 },
-    { id: 'marathon', label: 'Marathon', target: 42.195 },
-  ];
+  const fastestForTarget = (targetKm) => clean.filter(run => run.distance_km >= targetKm).sort((a, b) => getCanonicalPacePerKm(a) - getCanonicalPacePerKm(b))[0] || null;
+  const longest = clean.slice().sort((a, b) => b.distance_km - a.distance_km)[0] || null;
+  const fastest = clean.slice().sort((a, b) => getCanonicalPacePerKm(a) - getCanonicalPacePerKm(b))[0] || null;
+  const standards = getDistanceUnit() === 'km'
+    ? [
+      { id: '1k', label: 'Fastest 1K', targetKm: 1 },
+      { id: '5k', label: 'Fastest 5K', targetKm: 5 },
+      { id: '10k', label: 'Fastest 10K', targetKm: 10 },
+      { id: 'half', label: 'Half marathon', targetKm: 21.0975 },
+      { id: 'marathon', label: 'Marathon', targetKm: 42.195 },
+    ]
+    : [
+      { id: 'mile', label: 'Fastest mile', targetKm: KM_PER_MILE },
+      { id: '5k', label: 'Fastest 5K', targetKm: 5 },
+      { id: '10k', label: 'Fastest 10K', targetKm: 10 },
+      { id: 'half', label: 'Half marathon', targetKm: 21.0975 },
+      { id: 'marathon', label: 'Marathon', targetKm: 42.195 },
+    ];
   const prs = standards.map(item => {
-    const run = fastestFor(item.target);
-    return { ...item, run, value: run ? Math.round(getPace(run) * item.target) : null, kind: 'finish' };
+    const run = fastestForTarget(item.targetKm);
+    return { ...item, run, value: run ? Math.round(getCanonicalPacePerKm(run) * item.targetKm) : null, kind: 'finish' };
   });
   prs.push({ id: 'longest', label: 'Longest run', run: longest, value: longest?.distance_km ?? null, kind: 'distance' });
   prs.push({ id: 'pace', label: 'Fastest average pace', run: fastest, value: fastest ? getPace(fastest) : null, kind: 'pace' });
@@ -278,6 +339,8 @@ async function boot() {
   initIcons();
   setupChartDefaults();
   bindEvents();
+  restoreLiveRunState();
+  renderLiveRun();
   $('#run-date').value = todayISO();
   if (!isConfigured) { showConfigurationMessage(); return; }
 
@@ -363,8 +426,7 @@ async function hydrateFriends() {
   const accepted = state.relationships.filter(rel => rel.status === 'accepted');
   const ids = accepted.map(rel => rel.sender_id === state.user.id ? rel.receiver_id : rel.sender_id);
   if (!ids.length) { state.friends = []; return; }
-  const { data, error } = await supabase.from('profiles').select('*').in('id', ids);
-  if (error) throw error;
+  const data = await fetchProfilesByIds(ids);
   state.friends = (data || []).map(profile => ({ ...profile, settings: profile.settings || {} }));
 }
 
@@ -382,6 +444,7 @@ function renderAll() {
   renderFriends();
   renderProfile();
   renderSettings();
+  renderLiveRun();
   if (state.friendProfile) renderFriendProfile();
   initIcons();
 }
@@ -405,14 +468,14 @@ function renderDashboard() {
   const stats = getStats();
   const prs = getPRs();
   const cards = [
-    { label: 'TOTAL DISTANCE', value: formatDistanceValue(stats.totalDistance), unit: 'km', sub: 'all time', icon: 'route', accent: 'rgba(201,255,85,.21)' },
+    { label: 'TOTAL DISTANCE', value: formatDistanceValue(stats.totalDistance), unit: unitLabel(), sub: 'all time', icon: 'route', accent: 'rgba(201,255,85,.21)' },
     { label: 'TOTAL RUNS', value: stats.totalRuns, unit: '', sub: 'logged sessions', icon: 'layers-3', accent: 'rgba(125,183,255,.2)' },
     { label: 'TOTAL TIME', value: formatDurationShort(stats.totalTime), unit: '', sub: 'time on feet', icon: 'timer', accent: 'rgba(255,200,107,.18)' },
-    { label: 'AVERAGE PACE', value: Number.isFinite(stats.avgPace) ? formatPace(stats.avgPace).replace(' /km', '') : '—', unit: '/km', sub: 'across every run', icon: 'gauge', accent: 'rgba(255,135,95,.18)' },
-    { label: 'LONGEST RUN', value: formatDistanceValue(stats.longestRun), unit: 'km', sub: stats.longest ? formatDate(stats.longest.date, { month: 'short', day: 'numeric' }) : 'no runs yet', icon: 'mountain', accent: 'rgba(142,219,156,.2)' },
-    { label: 'FASTEST PACE', value: Number.isFinite(stats.fastestPace) ? formatPace(stats.fastestPace).replace(' /km', '') : '—', unit: '/km', sub: 'single-run average', icon: 'zap', accent: 'rgba(246,157,232,.18)' },
-    { label: 'THIS WEEK', value: formatDistanceValue(stats.weeklyDistance), unit: 'km', sub: plural(stats.weeklyRuns, 'run'), icon: 'calendar-days', accent: 'rgba(201,255,85,.21)' },
-    { label: 'THIS MONTH', value: formatDistanceValue(stats.monthlyDistance), unit: 'km', sub: plural(stats.monthlyRuns, 'run'), icon: 'calendar-range', accent: 'rgba(125,183,255,.2)' },
+    { label: 'AVERAGE PACE', value: Number.isFinite(stats.avgPace) ? formatPaceValue(stats.avgPace) : '—', unit: paceUnitLabel(), sub: 'across every run', icon: 'gauge', accent: 'rgba(255,135,95,.18)' },
+    { label: 'LONGEST RUN', value: formatDistanceValue(stats.longestRun), unit: unitLabel(), sub: stats.longest ? formatDate(stats.longest.date, { month: 'short', day: 'numeric' }) : 'no runs yet', icon: 'mountain', accent: 'rgba(142,219,156,.2)' },
+    { label: 'FASTEST PACE', value: Number.isFinite(stats.fastestPace) ? formatPaceValue(stats.fastestPace) : '—', unit: paceUnitLabel(), sub: 'single-run average', icon: 'zap', accent: 'rgba(246,157,232,.18)' },
+    { label: 'THIS WEEK', value: formatDistanceValue(stats.weeklyDistance), unit: unitLabel(), sub: plural(stats.weeklyRuns, 'run'), icon: 'calendar-days', accent: 'rgba(201,255,85,.21)' },
+    { label: 'THIS MONTH', value: formatDistanceValue(stats.monthlyDistance), unit: unitLabel(), sub: plural(stats.monthlyRuns, 'run'), icon: 'calendar-range', accent: 'rgba(125,183,255,.2)' },
     { label: 'CURRENT STREAK', value: stats.streak, unit: stats.streak === 1 ? 'day' : 'days', sub: stats.streak ? 'keep the chain alive' : 'start one today', icon: 'flame', accent: 'rgba(255,135,95,.2)' },
   ];
   $('#summary-stats').innerHTML = cards.map(card => `<article class="summary-card" style="--card-accent:${card.accent}"><span class="stat-trend"><i data-lucide="${card.icon}"></i></span><small>${card.label}</small><strong>${escapeHTML(String(card.value))} ${card.unit ? `<small>${escapeHTML(card.unit)}</small>` : ''}</strong><span>${escapeHTML(card.sub)}</span></article>`).join('');
@@ -426,7 +489,7 @@ function renderDashboard() {
     $('#dashboard-subheadline').textContent = 'The streak is real. Keep the promise you made to yourself.';
   } else if (stats.weeklyDistance >= Number(state.profile.weekly_goal_km || 30)) {
     $('#dashboard-headline').textContent = 'Weekly goal, handled.';
-    $('#dashboard-subheadline').textContent = 'You did the work. Everything else is a bonus mile.';
+    $('#dashboard-subheadline').textContent = `You did the work. Everything else is a bonus ${unitLabel()}.`;
   } else {
     $('#dashboard-headline').textContent = 'The work is compounding.';
     $('#dashboard-subheadline').textContent = `${formatDistance(Math.max(0, Number(state.profile.weekly_goal_km || 30) - stats.weeklyDistance))} to your weekly target.`;
@@ -440,13 +503,13 @@ function renderDashboard() {
 }
 
 function renderGoal(stats) {
-  const target = Number(state.profile?.weekly_goal_km || 30);
-  const pct = Math.min(100, Math.round((stats.weeklyDistance / target) * 100));
+  const targetKm = Number(state.profile?.weekly_goal_km || 30);
+  const pct = Math.min(100, Math.round((stats.weeklyDistance / targetKm) * 100));
   $('#weekly-goal-ring').style.setProperty('--progress', pct);
   $('#weekly-goal-percent').textContent = `${pct}%`;
   $('#weekly-goal-current').textContent = formatDistance(stats.weeklyDistance, 1);
-  $('#weekly-goal-target').textContent = `/ ${target} km`;
-  const remaining = Math.max(0, target - stats.weeklyDistance);
+  $('#weekly-goal-target').textContent = `/ ${formatDistance(targetKm, 1)}`;
+  const remaining = Math.max(0, targetKm - stats.weeklyDistance);
   $('#weekly-goal-insight').textContent = remaining <= 0 ? 'Goal complete. Keep moving if the body feels good.' : `${formatDistance(remaining, 1)} left to hit your target.`;
 }
 
@@ -481,14 +544,14 @@ function renderCalendar() {
     const iso = dateToISO(date);
     const distance = byDay.get(iso) || 0;
     const today = isSameDay(date, new Date()) ? 'today' : '';
-    cells.push(`<div class="calendar-day ${today}" title="${formatDate(iso)}${distance ? ` — ${formatDistance(distance)}` : ''}"><span>${day}</span>${distance ? `<span class="cal-distance">${distance.toFixed(1)}</span><i class="cal-dot"></i>` : ''}</div>`);
+    cells.push(`<div class="calendar-day ${today}" title="${formatDate(iso)}${distance ? ` — ${formatDistance(distance)}` : ''}"><span>${day}</span>${distance ? `<span class="cal-distance">${formatDistanceValue(distance, 1)}</span><i class="cal-dot"></i>` : ''}</div>`);
   }
   $('#calendar-grid').innerHTML = cells.join('');
 }
 
 function renderHistory() {
   const stats = getStats();
-  $('#history-summary').textContent = stats.totalRuns ? `${formatDistance(stats.totalDistance)} across ${plural(stats.totalRuns, 'run')}.` : 'Every kilometer you log will live here.';
+  $('#history-summary').textContent = stats.totalRuns ? `${formatDistance(stats.totalDistance)} across ${plural(stats.totalRuns, 'run')}.` : 'Every mile you log will live here.';
   applyHistoryFilters();
 }
 
@@ -501,11 +564,14 @@ function applyHistoryFilters() {
   if (search) runs = runs.filter(run => `${run.route_name || ''} ${run.notes || ''} ${run.run_type || ''}`.toLowerCase().includes(search));
   if (type !== 'all') runs = runs.filter(run => run.run_type === type);
   if (distance !== 'all') {
+    const thresholds = getDistanceUnit() === 'km'
+      ? { a: 5, b: 10, c: 21.0975 }
+      : { a: milesToKm(3), b: milesToKm(6.2), c: milesToKm(13.1) };
     runs = runs.filter(run => {
-      if (distance === 'under5') return run.distance_km < 5;
-      if (distance === '5to10') return run.distance_km >= 5 && run.distance_km < 10;
-      if (distance === '10to21') return run.distance_km >= 10 && run.distance_km < 21.0975;
-      return run.distance_km >= 21.0975;
+      if (distance === 'under3') return run.distance_km < thresholds.a;
+      if (distance === '3to6') return run.distance_km >= thresholds.a && run.distance_km < thresholds.b;
+      if (distance === '6to13') return run.distance_km >= thresholds.b && run.distance_km < thresholds.c;
+      return run.distance_km >= thresholds.c;
     });
   }
   const sorters = {
@@ -530,7 +596,7 @@ function renderStatistics() {
   const stats = getStats();
   const cards = [
     ['route', 'TOTAL DISTANCE', formatDistance(stats.totalDistance)],
-    ['mountain', 'TOTAL ELEVATION', `${Math.round(stats.totalElevation).toLocaleString()} m`],
+    ['mountain', 'TOTAL ELEVATION', formatElevation(stats.totalElevation)],
     ['timer', 'TOTAL RUNNING TIME', formatDurationShort(stats.totalTime)],
     ['move-right', 'AVERAGE RUN LENGTH', formatDistance(stats.avgRunLength)],
     ['gauge', 'AVERAGE PACE', formatPace(stats.avgPace)],
@@ -565,13 +631,13 @@ function renderHeatmap() {
   for (let i = 0; i < 182; i += 1) {
     const date = new Date(start); date.setDate(start.getDate() + i);
     const distance = daily.get(dateToISO(date)) || 0;
-    const level = distance >= 15 ? 4 : distance >= 10 ? 3 : distance >= 5 ? 2 : distance > 0 ? 1 : 0;
+    const displayDistance = kmToDisplay(distance); const level = displayDistance >= (getDistanceUnit() === 'km' ? 24 : 15) ? 4 : displayDistance >= (getDistanceUnit() === 'km' ? 16 : 10) ? 3 : displayDistance >= (getDistanceUnit() === 'km' ? 8 : 5) ? 2 : displayDistance > 0 ? 1 : 0;
     cells.push(`<span class="heatmap-day" data-level="${level}" title="${formatDate(dateToISO(date))}: ${formatDistance(distance)}"></span>`);
   }
   host.innerHTML = cells.join('');
 }
 function renderAchievements(stats) {
-  $('#achievement-grid').innerHTML = ACHIEVEMENTS.map(item => {
+  $('#achievement-grid').innerHTML = getAchievements().map(item => {
     const unlocked = item.unlocked(stats);
     return `<article class="achievement ${unlocked ? 'unlocked' : ''}"><span class="achievement-icon"><i data-lucide="${item.icon}"></i></span><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.copy)}</span></article>`;
   }).join('');
@@ -657,12 +723,12 @@ function renderCompare() {
     ['Total distance', mine.totalDistance, theirs.totalDistance, value => formatDistance(value)],
     ['Total runs', mine.totalRuns, theirs.totalRuns, value => value.toLocaleString()],
     ['Average pace', mine.avgPace, theirs.avgPace, value => formatPace(value), 'lower'],
-    ['Weekly mileage', mine.weeklyDistance, theirs.weeklyDistance, value => formatDistance(value)],
-    ['Monthly mileage', mine.monthlyDistance, theirs.monthlyDistance, value => formatDistance(value)],
+    ['Weekly distance', mine.weeklyDistance, theirs.weeklyDistance, value => formatDistance(value)],
+    ['Monthly distance', mine.monthlyDistance, theirs.monthlyDistance, value => formatDistance(value)],
     ['Longest run', mine.longestRun, theirs.longestRun, value => formatDistance(value)],
     ['Current streak', mine.streak, theirs.streak, value => `${value} days`],
   ];
-  $('#compare-content').innerHTML = `<div class="compare-header"><p class="eyebrow">HEAD TO HEAD</p><h2>Two training stories.</h2><p>Different mileage. Same commitment.</p><div class="vs-row"><div class="compare-person">${avatarMarkup(state.profile)}<span><strong>${escapeHTML(state.profile.display_name || 'You')}</strong><span>You</span></span></div><span class="vs-badge">vs</span><div class="compare-person right">${avatarMarkup(friend)}<span><strong>${escapeHTML(friend.display_name || 'Runner')}</strong><span>Friend</span></span></div></div></div><div class="compare-grid">${stats.map(([label, a, b, format, direction]) => compareStatMarkup(label, a, b, format, direction)).join('')}</div><article class="panel chart-panel compare-chart-panel"><div class="panel-heading"><div><p class="eyebrow">VOLUME MATCHUP</p><h3>Weekly distance</h3></div><span class="panel-note">Last 12 weeks</span></div><div class="chart-wrap"><canvas id="compare-chart"></canvas></div></article>`;
+  $('#compare-content').innerHTML = `<div class="compare-header"><p class="eyebrow">HEAD TO HEAD</p><h2>Two training stories.</h2><p>Different distance. Same commitment.</p><div class="vs-row"><div class="compare-person">${avatarMarkup(state.profile)}<span><strong>${escapeHTML(state.profile.display_name || 'You')}</strong><span>You</span></span></div><span class="vs-badge">vs</span><div class="compare-person right">${avatarMarkup(friend)}<span><strong>${escapeHTML(friend.display_name || 'Runner')}</strong><span>Friend</span></span></div></div></div><div class="compare-grid">${stats.map(([label, a, b, format, direction]) => compareStatMarkup(label, a, b, format, direction)).join('')}</div><article class="panel chart-panel compare-chart-panel"><div class="panel-heading"><div><p class="eyebrow">VOLUME MATCHUP</p><h3>Weekly distance</h3></div><span class="panel-note">Last 12 weeks</span></div><div class="chart-wrap"><canvas id="compare-chart"></canvas></div></article>`;
   renderCompareChart();
   initIcons();
 }
@@ -685,10 +751,24 @@ function renderProfile() {
   host.innerHTML = `<div class="profile-hero">${avatarMarkup(profile, 'avatar-xl')}<div class="profile-identity"><p class="eyebrow">YOUR RUNNING PROFILE</p><h2>${escapeHTML(profile.display_name || 'Runner')}</h2><p>${escapeHTML(profile.email || state.user?.email || '')}</p><div class="profile-facts"><span>Member since <b>${formatDate(profile.joined_at || todayISO(), { month: 'short', year: 'numeric' })}</b></span><span><b>${state.friends.length}</b> friends</span></div></div><div class="profile-hero-actions"><button id="edit-profile-btn" class="btn btn-soft" type="button"><i data-lucide="pencil"></i>Edit profile</button></div></div><div class="profile-dashboard-grid"><article class="panel"><div class="panel-heading"><div><p class="eyebrow">YOUR OVERVIEW</p><h3>Lifetime effort</h3></div></div><div class="profile-info-list"><div><span>Total distance</span><strong>${formatDistance(stats.totalDistance)}</strong></div><div><span>Runs logged</span><strong>${stats.totalRuns}</strong></div><div><span>Time on feet</span><strong>${formatDurationShort(stats.totalTime)}</strong></div><div><span>Current streak</span><strong>${stats.streak} days</strong></div></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">BEST WORK</p><h3>Personal records</h3></div></div><div class="mini-pr-grid">${getPRs().slice(0,4).map(pr => `<button class="mini-pr" ${pr.run ? `data-run-id="${pr.run.id}"` : ''}><span>${escapeHTML(pr.label)}</span><strong>${formatPRValue(pr)}</strong><small>${pr.run ? formatDate(pr.run.date, { month: 'short', day: 'numeric' }) : 'Keep building'}</small></button>`).join('')}</div></article></div>`;
 }
 
+function refreshUnitLabels() {
+  const unit = getDistanceUnit();
+  $$('[data-distance-unit]').forEach(el => { el.textContent = unitLabel(unit); });
+  $$('[data-elevation-unit]').forEach(el => { el.textContent = elevationUnitLabel(unit); });
+  $$('.unit-choice').forEach(button => button.classList.toggle('active', button.dataset.distanceUnitChoice === unit));
+  const filters = $('#filter-distance');
+  if (filters) {
+    const labels = unit === 'km'
+      ? { under3: 'Under 5 km', '3to6': '5–10 km', '6to13': '10–21.1 km', over13: 'Half marathon+' }
+      : { under3: 'Under 3 mi', '3to6': '3–6.2 mi', '6to13': '6.2–13.1 mi', over13: 'Half marathon+' };
+    Object.entries(labels).forEach(([value, label]) => { const option = filters.querySelector(`option[value="${value}"]`); if (option) option.textContent = label; });
+  }
+}
 function renderSettings() {
   if (!state.profile) return;
-  $('#settings-weekly-goal').value = Number(state.profile.weekly_goal_km || 30);
-  $('#settings-monthly-goal').value = Number(state.profile.monthly_goal_km || 120);
+  refreshUnitLabels();
+  setDistanceInputFromCanonical($('#settings-weekly-goal'), Number(state.profile.weekly_goal_km || 30), 6);
+  setDistanceInputFromCanonical($('#settings-monthly-goal'), Number(state.profile.monthly_goal_km || 120), 6);
   $('#settings-share-activity').checked = state.profile.settings?.share_activity !== false;
 }
 
@@ -699,7 +779,7 @@ function renderDashboardChart() {
     type: 'line',
     labels: series.labels,
     datasets: [{ label: 'Distance', data: series.values, borderColor: getCss('--lime'), backgroundColor: makeGradient('dashboard-distance-chart', 'rgba(201,255,85,.25)', 'rgba(201,255,85,0)'), fill: true, tension: .37, pointRadius: 0, pointHoverRadius: 4, borderWidth: 2 }],
-    yTitle: 'km',
+    yTitle: unitLabel(),
   });
 }
 function renderFrequencyChart() {
@@ -711,8 +791,8 @@ function renderTimeChart() {
   createChart('time-chart', { type: 'bar', labels: series.labels, datasets: [{ label: 'Hours', data: series.values.map(v => round(v, 1)), backgroundColor: 'rgba(255,200,107,.62)', borderRadius: 5, maxBarThickness: 34 }], yTitle: 'hours' });
 }
 function renderWeeklyMileageChart(runs) {
-  const series = groupedSeries(runs, 'week', 12, run => run.distance_km, 'Distance');
-  createChart('weekly-mileage-chart', { type: 'bar', labels: series.labels, datasets: [{ label: 'Distance', data: series.values.map(v => round(v, 1)), backgroundColor: 'rgba(201,255,85,.67)', borderRadius: 5, maxBarThickness: 31 }], yTitle: 'km', zoom: true });
+  const series = groupedSeries(runs, 'week', 12, run => kmToDisplay(run.distance_km), 'Distance');
+  createChart('weekly-mileage-chart', { type: 'bar', labels: series.labels, datasets: [{ label: 'Distance', data: series.values.map(v => round(v, 1)), backgroundColor: 'rgba(201,255,85,.67)', borderRadius: 5, maxBarThickness: 31 }], yTitle: unitLabel(), zoom: true });
 }
 function renderPaceChart(runs) {
   const sorted = [...runs].sort((a,b) => a.date.localeCompare(b.date));
@@ -720,7 +800,7 @@ function renderPaceChart(runs) {
 }
 function renderLongestRunsChart(runs) {
   const sorted = [...runs].sort((a,b) => a.date.localeCompare(b.date));
-  createChart('longest-runs-chart', { type: 'line', labels: sorted.map(run => formatDate(run.date, { month: 'short', day: 'numeric' })), datasets: [{ label: 'Distance', data: sorted.map(run => run.distance_km), borderColor: getCss('--blue'), backgroundColor: makeGradient('longest-runs-chart','rgba(125,183,255,.22)','rgba(125,183,255,0)'), fill:true,tension:.3,pointRadius:2,pointHoverRadius:4,borderWidth:2 }], yTitle:'km',zoom:true });
+  createChart('longest-runs-chart', { type: 'line', labels: sorted.map(run => formatDate(run.date, { month: 'short', day: 'numeric' })), datasets: [{ label: 'Distance', data: sorted.map(run => kmToDisplay(run.distance_km)), borderColor: getCss('--blue'), backgroundColor: makeGradient('longest-runs-chart','rgba(125,183,255,.22)','rgba(125,183,255,0)'), fill:true,tension:.3,pointRadius:2,pointHoverRadius:4,borderWidth:2 }], yTitle:unitLabel(),zoom:true });
 }
 function renderPRChart(runs) {
   const sorted = [...runs].sort((a,b) => a.date.localeCompare(b.date)).filter(run => run.distance_km >= 5);
@@ -730,12 +810,12 @@ function renderPRChart(runs) {
 }
 function renderCompareChart() {
   if (!state.friendProfile) return;
-  const mine = groupedSeries(state.runs, 'week', 12, run => run.distance_km, 'Distance');
-  const theirValues = valuesForSeries(state.friendRuns, mine.keys, 'week', run => run.distance_km);
+  const mine = groupedSeries(state.runs, 'week', 12, run => kmToDisplay(run.distance_km), 'Distance');
+  const theirValues = valuesForSeries(state.friendRuns, mine.keys, 'week', run => kmToDisplay(run.distance_km));
   createChart('compare-chart', { type: 'line', labels: mine.labels, datasets: [
     { label: state.profile.display_name || 'You', data: mine.values, borderColor: getCss('--lime'), backgroundColor:'rgba(201,255,85,.08)', fill:true,tension:.35,pointRadius:2,borderWidth:2 },
     { label: state.friendProfile.display_name || 'Friend', data: theirValues, borderColor: getCss('--orange'), backgroundColor:'rgba(255,135,95,.03)', fill:true,tension:.35,pointRadius:2,borderWidth:2 },
-  ], yTitle:'km', showLegend:true });
+  ], yTitle:unitLabel(), showLegend:true });
 }
 
 function dailySeries(runs, range, defaultDays = 30) {
@@ -745,7 +825,7 @@ function dailySeries(runs, range, defaultDays = 30) {
   const labels = []; const values = [];
   const cursor = startOfDay(start); const end = startOfDay(new Date());
   while (cursor <= end) {
-    const iso = dateToISO(cursor); labels.push(cursor.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })); values.push(round(points.get(iso) || 0, 2)); cursor.setDate(cursor.getDate() + 1);
+    const iso = dateToISO(cursor); labels.push(cursor.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })); values.push(round(kmToDisplay(points.get(iso) || 0), 2)); cursor.setDate(cursor.getDate() + 1);
   }
   return { labels, values };
 }
@@ -800,7 +880,7 @@ function createChart(canvasId, { type, labels, datasets, yTitle = '', paceAxis =
       },
       scales: {
         x: { grid: { display: false }, ticks: { color: text, maxTicksLimit: 7, maxRotation: 0 }, border: { display: false } },
-        y: { beginAtZero: !paceAxis, grid: { color: grid }, ticks: { color: text, callback: value => paceAxis ? formatPace(value).replace(' /km','') : `${value}${yTitle ? ` ${yTitle}` : ''}` }, border: { display: false } },
+        y: { beginAtZero: !paceAxis, grid: { color: grid }, ticks: { color: text, callback: value => paceAxis ? formatPaceValue(value) : `${value}${yTitle ? ` ${yTitle}` : ''}` }, border: { display: false } },
       },
     },
   });
@@ -812,13 +892,13 @@ function emptyState(icon, title, copy, actionText = '', actionView = '') {
 }
 
 function navigateTo(view, updateHash = true) {
-  const available = ['dashboard','log-run','history','statistics','progress','friends','friend-profile','compare','profile','settings'];
+  const available = ['dashboard','log-run','live-run','history','statistics','progress','friends','friend-profile','compare','profile','settings'];
   if (!available.includes(view)) view = 'dashboard';
   state.activeView = view;
   $$('.view').forEach(el => el.classList.toggle('active-view', el.id === `view-${view}`));
   $$('.nav-link').forEach(link => link.classList.toggle('active', link.dataset.view === view));
   const page = {
-    dashboard: ['OVERVIEW', ''], 'log-run': ['NEW ACTIVITY','Log a run'], history: ['YOUR ARCHIVE','Run history'], statistics: ['THE DETAILS','Statistics'], progress: ['THE LONG VIEW','Progress'], friends: ['YOUR RUNNING CIRCLE','Friends'], 'friend-profile': ['RUNNING TOGETHER','Friend profile'], compare: ['HEAD TO HEAD','Compare'], profile: ['YOUR RUNNING PROFILE','My profile'], settings: ['YOUR PREFERENCES','Settings'],
+    dashboard: ['OVERVIEW', ''], 'log-run': ['NEW ACTIVITY','Log a run'], 'live-run': ['LIVE ACTIVITY','Live run'], history: ['YOUR ARCHIVE','Run history'], statistics: ['THE DETAILS','Statistics'], progress: ['THE LONG VIEW','Progress'], friends: ['YOUR RUNNING CIRCLE','Friends'], 'friend-profile': ['RUNNING TOGETHER','Friend profile'], compare: ['HEAD TO HEAD','Compare'], profile: ['YOUR RUNNING PROFILE','My profile'], settings: ['YOUR PREFERENCES','Settings'],
   }[view];
   $('#page-kicker').textContent = page[0];
   if (view !== 'dashboard') $('#page-title').textContent = page[1]; else renderTopbar();
@@ -862,63 +942,52 @@ async function handleAuthSubmit(event, mode) {
 async function handleRunSubmit(event) {
   event.preventDefault();
   const distance = Number($('#run-distance').value);
-  const hours = Number($('#run-hours').value || 0); const minutes = Number($('#run-minutes').value || 0); const seconds = Number($('#run-seconds').value || 0);
-  const duration = hours * 3600 + minutes * 60 + seconds;
+  const hours = Math.max(0, Number($('#run-hours').value || 0)); const minutes = Math.max(0, Number($('#run-minutes').value || 0)); const seconds = Math.max(0, Number($('#run-seconds').value || 0));
+  const duration_seconds = Math.round(hours * 3600 + minutes * 60 + seconds);
   if (!(distance > 0)) return showToast('Enter a valid distance', 'Distance must be greater than zero.', 'error');
-  if (!(duration > 0)) return showToast('Enter a valid time', 'Time must be greater than zero.', 'error');
-  const before = getPRs();
+  if (!(duration_seconds > 0)) return showToast('Enter a valid time', 'Time must be greater than zero.', 'error');
   const payload = {
     user_id: state.user.id,
-    distance_km: round(distance, 3),
-    duration_seconds: Math.round(duration),
     date: $('#run-date').value || todayISO(),
+    distance_km: distanceInputToCanonical($('#run-distance')),
+    duration_seconds,
+    run_type: $('#run-type').value,
     route_name: $('#run-route').value.trim() || null,
     notes: $('#run-notes').value.trim() || null,
-    elevation_m: Number($('#run-elevation').value || 0),
-    calories: Number($('#run-calories').value || 0),
-    run_type: $('#run-type').value,
-    visibility: $('#run-visibility').value,
+    elevation_m: elevationInputToCanonical($('#run-elevation')),
+    calories: Math.max(0, Number($('#run-calories').value || 0)),
+    visibility: $('#run-visibility').value === 'private' ? 'private' : 'friends',
   };
+  const before = getPRs();
   const submit = $('#run-form button[type="submit"]'); submit.disabled = true;
   try {
-    let result;
-    if (state.editingRunId) result = await supabase.from('runs').update(payload).eq('id', state.editingRunId).eq('user_id', state.user.id).select().single();
-    else result = await supabase.from('runs').insert(payload).select().single();
-    if (result.error) throw result.error;
-    const saved = normalizeRun(result.data);
-    state.editingRunId = null;
-    resetRunForm();
-    await refreshAppData({ silent: true });
-    const after = getPRs();
-    const newRecords = after.filter(pr => pr.run?.id === saved.id && before.find(old => old.id === pr.id)?.run?.id !== saved.id);
+    let error;
+    if (state.editingRunId) ({ error } = await supabase.from('runs').update(payload).eq('id', state.editingRunId).eq('user_id', state.user.id));
+    else ({ error } = await supabase.from('runs').insert(payload));
+    if (error) throw error;
+    state.editingRunId = null; resetRunForm(); await refreshAppData({ silent: true });
+    const after = getPRs(); const newRecords = after.filter(pr => pr.run && !before.find(old => old.id === pr.id && old.run?.id === pr.run.id));
     showToast(newRecords.length ? 'New personal record!' : 'Run saved', newRecords.length ? newRecords.map(pr => pr.label).slice(0, 2).join(' · ') : 'Your stats, progress, and goals are up to date.');
-    navigateTo('dashboard');
-  } catch (error) { showToast('Could not save this run', error.message || 'Try again.', 'error'); }
+  } catch (error) { showToast('Could not save run', error.message, 'error'); }
   finally { submit.disabled = false; }
 }
-
 function resetRunForm() {
-  $('#run-form').reset();
-  $('#run-date').value = todayISO(); $('#run-hours').value = '0'; $('#run-minutes').value = ''; $('#run-seconds').value = ''; $('#run-type').value = 'Easy'; $('#run-visibility').value = 'friends';
-  updateRunPreview();
+  $('#run-form').reset(); delete $('#run-distance').dataset.canonicalKm; delete $('#run-distance').dataset.renderedValue; delete $('#run-elevation').dataset.canonicalM; delete $('#run-elevation').dataset.renderedValue; $('#run-date').value = todayISO(); $('#run-hours').value = 0;
   $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="check"></i>Save run';
-  initIcons();
+  updateRunPreview(); initIcons();
 }
 function editRun(run) {
   state.editingRunId = run.id;
-  $('#run-distance').value = run.distance_km;
+  setDistanceInputFromCanonical($('#run-distance'), run.distance_km, 6);
   const h = Math.floor(run.duration_seconds / 3600); const m = Math.floor((run.duration_seconds % 3600) / 60); const s = run.duration_seconds % 60;
-  $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s;
-  $('#run-date').value = run.date; $('#run-type').value = run.run_type || 'Easy'; $('#run-route').value = run.route_name || ''; $('#run-elevation').value = run.elevation_m || ''; $('#run-calories').value = run.calories || ''; $('#run-notes').value = run.notes || ''; $('#run-visibility').value = run.visibility || 'friends';
-  $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="save"></i>Update run';
-  updateRunPreview(); navigateTo('log-run'); initIcons();
+  $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s; $('#run-date').value = run.date; $('#run-type').value = run.run_type || 'Easy'; $('#run-route').value = run.route_name || ''; $('#run-notes').value = run.notes || ''; if (run.elevation_m) setElevationInputFromCanonical($('#run-elevation'), run.elevation_m); else { $('#run-elevation').value = ''; delete $('#run-elevation').dataset.canonicalM; delete $('#run-elevation').dataset.renderedValue; } $('#run-calories').value = run.calories || ''; $('#run-visibility').value = run.visibility || 'friends';
+  $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="save"></i>Update run'; navigateTo('log-run'); updateRunPreview(); initIcons();
 }
 function updateRunPreview() {
   const distance = Number($('#run-distance')?.value || 0);
-  const h = Number($('#run-hours')?.value || 0); const m = Number($('#run-minutes')?.value || 0); const s = Number($('#run-seconds')?.value || 0);
-  const duration = h * 3600 + m * 60 + s;
+  const hours = Number($('#run-hours')?.value || 0), minutes = Number($('#run-minutes')?.value || 0), seconds = Number($('#run-seconds')?.value || 0); const duration = hours * 3600 + minutes * 60 + seconds;
   $('#live-pace').textContent = distance && duration ? formatPace(duration / distance) : '—';
-  $('#preview-distance').innerHTML = `${distance.toFixed(2)} <small>km</small>`;
+  $('#preview-distance').innerHTML = `${distance.toFixed(2)} <small>${unitLabel()}</small>`;
   $('#preview-time').textContent = formatDuration(duration);
   $('#preview-pace').textContent = distance && duration ? formatPace(duration / distance) : '—';
   $('#preview-type').textContent = $('#run-type')?.value || 'Easy';
@@ -927,9 +996,9 @@ function updateRunPreview() {
 }
 function previewPotentialPR(distance, duration) {
   if (!distance || !duration) return { title: 'A new page, every run.', copy: 'Your personal records will surface here as you build your history.' };
-  const pace = duration / distance; const prs = getPRs(); const checks = [
-    { target: 5, id: '5k', label: 'You could set a 5K record.' }, { target: 10, id: '10k', label: 'You could set a 10K record.' }, { target: 21.0975, id: 'half', label: 'You could set a half marathon record.' },
-  ];
+  const pace = duration / distance; const prs = getPRs(); const checks = getDistanceUnit() === 'km'
+    ? [{ id: '1k', target: 1, label: 'A 1K personal record.' }, { id: '5k', target: 5, label: 'A 5K personal record.' }, { id: '10k', target: 10, label: 'A 10K personal record.' }, { id: 'half', target: 21.0975, label: 'A half marathon record.' }]
+    : [{ id: 'mile', target: 1, label: 'A one-mile personal record.' }, { id: '5k', target: kmToMiles(5), label: 'A 5K personal record.' }, { id: '10k', target: kmToMiles(10), label: 'A 10K personal record.' }, { id: 'half', target: kmToMiles(21.0975), label: 'A half marathon record.' }];
   const potential = checks.find(check => distance >= check.target && (!prs.find(pr => pr.id === check.id)?.run || pace < getPace(prs.find(pr => pr.id === check.id).run)));
   return potential ? { title: potential.label, copy: `At ${formatPace(pace)}, this would become your best qualifying effort.` } : { title: 'Effort captured, progress kept.', copy: `A ${formatPace(pace)} average adds more signal to your training story.` };
 }
@@ -938,7 +1007,7 @@ function openRunModal(run, { isFriendRun = false } = {}) {
   if (!run) return;
   const host = $('#run-modal-content');
   const type = run.run_type || 'Run';
-  host.innerHTML = `<div class="run-modal-header">${activityIcon(type)}<div><p class="eyebrow">${escapeHTML(type).toUpperCase()}</p><h3 id="run-modal-title">${escapeHTML(run.route_name || `${type} run`)}</h3><p style="margin:4px 0 0;color:var(--muted);font-size:11px;">${formatDate(run.date)}</p></div><div class="run-modal-distance"><strong>${formatDistance(run.distance_km)}</strong><span>${formatPace(getPace(run))}</span></div></div><div class="run-modal-details"><div class="run-modal-detail"><small>TIME</small><strong>${formatDuration(run.duration_seconds)}</strong></div><div class="run-modal-detail"><small>ELEVATION</small><strong>${Math.round(run.elevation_m || 0)} m</strong></div><div class="run-modal-detail"><small>CALORIES</small><strong>${Math.round(run.calories || 0)} kcal</strong></div></div>${run.notes ? `<div class="run-modal-note">${escapeHTML(run.notes).replace(/\n/g, '<br>')}</div>` : ''}${!isFriendRun ? `<div class="run-modal-actions"><button id="modal-delete-run" class="btn btn-danger" type="button"><i data-lucide="trash-2"></i>Delete</button><button id="modal-edit-run" class="btn btn-primary" type="button"><i data-lucide="pencil"></i>Edit run</button></div>` : ''}`;
+  host.innerHTML = `<div class="run-modal-header">${activityIcon(type)}<div><p class="eyebrow">${escapeHTML(type).toUpperCase()}</p><h3 id="run-modal-title">${escapeHTML(run.route_name || `${type} run`)}</h3><p style="margin:4px 0 0;color:var(--muted);font-size:11px;">${formatDate(run.date)}</p></div><div class="run-modal-distance"><strong>${formatDistance(run.distance_km)}</strong><span>${formatPace(getPace(run))}</span></div></div><div class="run-modal-details"><div class="run-modal-detail"><small>TIME</small><strong>${formatDuration(run.duration_seconds)}</strong></div><div class="run-modal-detail"><small>ELEVATION</small><strong>${formatElevation(run.elevation_m || 0)}</strong></div><div class="run-modal-detail"><small>CALORIES</small><strong>${Math.round(run.calories || 0)} kcal</strong></div></div>${run.notes ? `<div class="run-modal-note">${escapeHTML(run.notes).replace(/\n/g, '<br>')}</div>` : ''}${!isFriendRun ? `<div class="run-modal-actions"><button id="modal-delete-run" class="btn btn-danger" type="button"><i data-lucide="trash-2"></i>Delete</button><button id="modal-edit-run" class="btn btn-primary" type="button"><i data-lucide="pencil"></i>Edit run</button></div>` : ''}`;
   $('#run-modal').classList.remove('hidden'); initIcons();
   if (!isFriendRun) {
     $('#modal-edit-run').onclick = () => { closeModal('run-modal'); editRun(run); };
@@ -964,7 +1033,7 @@ async function searchFriends() {
   host.innerHTML = '<div class="loading-line"></div>';
   try {
     const safe = query.replace(/[,%()]/g, '');
-    const { data, error } = await supabase.from('profiles').select('*').neq('id', state.user.id).or(`display_name.ilike.%${safe}%,email.ilike.%${safe}%`).limit(12);
+    const { data, error } = await supabase.rpc('search_paceforge_profiles', { search_term: safe });
     if (error) throw error;
     if (!data?.length) { host.innerHTML = '<p style="margin:8px 0 0;color:var(--subtle);font-size:10px;">No runners found. Try a different name or email.</p>'; return; }
     host.innerHTML = data.map(profile => {
@@ -973,7 +1042,7 @@ async function searchFriends() {
       if (rel?.status === 'accepted') control = '<span class="panel-note">Already friends</span>';
       if (rel?.status === 'pending' && rel.sender_id === state.user.id) control = '<span class="panel-note">Request sent</span>';
       if (rel?.status === 'pending' && rel.receiver_id === state.user.id) control = `<button class="btn btn-soft" type="button" data-request-action="accept" data-request-id="${rel.id}">Accept</button>`;
-      return `<div class="search-result">${avatarMarkup(profile)}<span class="friend-copy"><strong>${escapeHTML(profile.display_name || 'Runner')}</strong><span>${escapeHTML(profile.email || '')}</span></span>${control}</div>`;
+      return `<div class="search-result">${avatarMarkup(profile)}<span class="friend-copy"><strong>${escapeHTML(profile.display_name || 'Runner')}</strong><span>Runner on FytRun</span></span>${control}</div>`;
     }).join(''); initIcons();
   } catch (error) { host.innerHTML = `<p style="margin:8px 0 0;color:var(--danger);font-size:10px;">${escapeHTML(error.message)}</p>`; }
 }
@@ -995,14 +1064,15 @@ async function respondFriendRequest(requestId, status) {
 }
 async function fetchProfilesByIds(ids) {
   if (!ids.length) return [];
-  const { data, error } = await supabase.from('profiles').select('*').in('id', ids);
+  const { data, error } = await supabase.rpc('paceforge_profiles_by_ids', { profile_ids: ids });
   if (error) throw error;
   return (data || []).map(profile => ({ ...profile, settings: profile.settings || {} }));
 }
 async function openFriendProfile(friendId) {
   try {
-    const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', friendId).single();
-    if (error) throw error;
+    const profiles = await fetchProfilesByIds([friendId]);
+    const profile = profiles[0];
+    if (!profile) throw new Error('This profile is no longer available to you.');
     const { data: runs, error: runsError } = await supabase.from('runs').select('*').eq('user_id', friendId).order('date', { ascending: false });
     if (runsError) throw runsError;
     state.viewingFriend = friendId; state.friendProfile = { ...profile, settings: profile.settings || {} }; state.friendRuns = (runs || []).map(normalizeRun);
@@ -1020,9 +1090,47 @@ async function removeFriend() {
 
 async function saveGoals(event) {
   event.preventDefault();
-  const weekly_goal_km = Math.max(1, Number($('#settings-weekly-goal').value || 30)); const monthly_goal_km = Math.max(1, Number($('#settings-monthly-goal').value || 120));
+  const weekly_goal_km = distanceInputToCanonical($('#settings-weekly-goal'));
+  const monthly_goal_km = distanceInputToCanonical($('#settings-monthly-goal'));
+  if (!(weekly_goal_km > 0) || !(monthly_goal_km > 0)) return showToast('Enter valid goals', 'Both weekly and monthly targets must be greater than zero.', 'error');
   try { const { data, error } = await supabase.from('profiles').update({ weekly_goal_km, monthly_goal_km }).eq('id', state.user.id).select().single(); if (error) throw error; state.profile = { ...data, settings: data.settings || {} }; renderAll(); showToast('Goals saved', 'Your dashboard ring now reflects the new target.'); }
   catch (error) { showToast('Could not save goals', error.message, 'error'); }
+}
+function captureUnitSensitiveDraft(unit) {
+  const fieldNumber = selector => Number($(selector)?.value || 0);
+  const runDistance = fieldNumber('#run-distance'); const runElevation = fieldNumber('#run-elevation'); const liveDistance = fieldNumber('#live-run-distance');
+  return {
+    runDistanceKm: runDistance > 0 ? displayToKm(runDistance, unit) : 0,
+    runElevationM: runElevation > 0 ? displayToMeters(runElevation, unit) : 0,
+    runDistanceCanonicalKm: Number($('#run-distance')?.dataset.canonicalKm || 0),
+    runElevationCanonicalM: Number($('#run-elevation')?.dataset.canonicalM || 0),
+    liveDistanceKm: liveDistance > 0 ? displayToKm(liveDistance, unit) : state.liveRun.distanceKm || 0,
+  };
+}
+function restoreUnitSensitiveDraft(draft) {
+  if (draft.runDistanceKm > 0) {
+    if (draft.runDistanceCanonicalKm > 0) setDistanceInputFromCanonical($('#run-distance'), draft.runDistanceCanonicalKm, 6);
+    else $('#run-distance').value = formatUnitInput(draft.runDistanceKm, 6);
+  }
+  if (draft.runElevationM > 0) {
+    if (draft.runElevationCanonicalM > 0) setElevationInputFromCanonical($('#run-elevation'), draft.runElevationCanonicalM);
+    else $('#run-elevation').value = formatElevationInput(draft.runElevationM, 3);
+  }
+  state.liveRun.distanceKm = draft.liveDistanceKm;
+  if ($('#live-run-distance')) $('#live-run-distance').value = draft.liveDistanceKm > 0 ? formatUnitInput(draft.liveDistanceKm, 4) : '';
+  updateRunPreview(); renderLiveRun();
+}
+async function setDistanceUnit(unit) {
+  if (!['mi', 'km'].includes(unit) || unit === getDistanceUnit()) return;
+  const previousUnit = getDistanceUnit(); const draft = captureUnitSensitiveDraft(previousUnit);
+  const settings = { ...(state.profile.settings || {}), distance_unit: unit };
+  try {
+    const { data, error } = await supabase.from('profiles').update({ settings }).eq('id', state.user.id).select().single();
+    if (error) throw error;
+    state.profile = { ...data, settings: data.settings || {} };
+    renderAll(); restoreUnitSensitiveDraft(draft);
+    showToast(`Units set to ${unit === 'km' ? 'kilometers' : 'miles'}`, 'Your existing runs and goals were converted for display only.');
+  } catch (error) { showToast('Could not change units', error.message, 'error'); }
 }
 async function savePrivacy(event) {
   event.preventDefault();
@@ -1084,21 +1192,45 @@ async function deleteAccount() {
 
 function exportCSV() {
   if (!state.runs.length) return showToast('Nothing to export', 'Log a run first, then your CSV will be ready.', 'error');
-  const headers = ['date','distance_km','duration_seconds','pace_per_km','run_type','route_name','elevation_m','calories','visibility','notes'];
-  const rows = state.runs.map(run => [run.date, run.distance_km, run.duration_seconds, Math.round(getPace(run)), run.run_type || '', run.route_name || '', run.elevation_m || 0, run.calories || 0, run.visibility || 'friends', run.notes || '']);
+  const headers = ['date','distance_km','distance_miles','duration_seconds','pace_per_km','pace_per_mile','run_type','route_name','elevation_m','elevation_ft','calories','visibility','notes'];
+  const rows = state.runs.map(run => [
+    run.date,
+    round(run.distance_km, 6),
+    round(kmToMiles(run.distance_km), 6),
+    run.duration_seconds,
+    round(getPace(run, 'km'), 3),
+    round(getPace(run, 'mi'), 3),
+    run.run_type || '', run.route_name || '',
+    round(run.elevation_m || 0, 3),
+    round(metersToDisplay(run.elevation_m || 0, 'mi'), 3),
+    run.calories || 0, run.visibility || 'friends', run.notes || '',
+  ]);
   const csv = [headers, ...rows].map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-  downloadFile(csv, `FytRun-runs-${todayISO()}.csv`, 'text/csv;charset=utf-8'); showToast('Export ready', `${state.runs.length} runs exported to CSV.`);
+  downloadFile(csv, `fytrun-runs-${todayISO()}.csv`, 'text/csv;charset=utf-8'); showToast('Export ready', `${state.runs.length} runs exported with both km and miles columns.`);
 }
 function downloadFile(content, filename, type) { const url = URL.createObjectURL(new Blob([content], { type })); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
+function parseNumeric(value) { const parsed = Number(String(value ?? '').trim()); return Number.isFinite(parsed) ? parsed : 0; }
+function normalizeImportedUnit(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (['km','kilometer','kilometers','kilometre','kilometres'].includes(raw)) return 'km';
+  if (['mi','mile','miles'].includes(raw)) return 'mi';
+  return null;
+}
 async function importCSV(file) {
   if (!file) return;
   try {
     const text = await file.text(); const rows = parseCSV(text); if (!rows.length) throw new Error('The CSV does not contain any data rows.');
     const payloads = rows.map((row, index) => {
-      const distance = Number(row.distance_km || row.distance || 0); const duration = Number(row.duration_seconds || row.duration || 0);
+      const canonicalKm = parseNumeric(row.distance_km);
+      const miles = parseNumeric(row.distance_miles || row.distance_mi || row.miles);
+      const genericDistance = parseNumeric(row.distance);
+      const genericUnit = normalizeImportedUnit(row.distance_unit || row.unit) || getDistanceUnit();
+      const distanceKm = canonicalKm > 0 ? canonicalKm : miles > 0 ? milesToKm(miles) : genericDistance > 0 ? displayToKm(genericDistance, genericUnit) : 0;
+      const duration = parseNumeric(row.duration_seconds || row.duration);
+      const elevationM = parseNumeric(row.elevation_m) > 0 ? parseNumeric(row.elevation_m) : displayToMeters(parseNumeric(row.elevation_ft), 'mi');
       const date = row.date || todayISO();
-      if (!distance || !duration || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`Row ${index + 2} needs date (YYYY-MM-DD), distance_km, and duration_seconds.`);
-      return { user_id: state.user.id, date, distance_km: round(distance, 3), duration_seconds: Math.round(duration), run_type: row.run_type || 'Other', route_name: row.route_name || null, notes: row.notes || null, elevation_m: Number(row.elevation_m || 0), calories: Number(row.calories || 0), visibility: row.visibility === 'private' ? 'private' : 'friends' };
+      if (!distanceKm || !duration || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`Row ${index + 2} needs date (YYYY-MM-DD), a distance column (distance_km or distance_miles), and duration_seconds.`);
+      return { user_id: state.user.id, date, distance_km: round(distanceKm, 6), duration_seconds: Math.round(duration), run_type: row.run_type || 'Other', route_name: row.route_name || null, notes: row.notes || null, elevation_m: round(Math.max(0, elevationM), 3), calories: Math.max(0, parseNumeric(row.calories)), visibility: row.visibility === 'private' ? 'private' : 'friends' };
     });
     if (payloads.length > 500) throw new Error('Import up to 500 rows at a time.');
     const { error } = await supabase.from('runs').insert(payloads); if (error) throw error;
@@ -1106,12 +1238,105 @@ async function importCSV(file) {
   } catch (error) { showToast('Could not import CSV', error.message, 'error'); }
   finally { $('#import-csv-input').value = ''; }
 }
+
 function parseCSV(text) {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(line => line.trim());
   if (lines.length < 2) return [];
   const parseLine = line => { const values = []; let current = ''; let inQuotes = false; for (let i = 0; i < line.length; i += 1) { const char = line[i]; const next = line[i+1]; if (char === '"' && inQuotes && next === '"') { current += '"'; i += 1; } else if (char === '"') inQuotes = !inQuotes; else if (char === ',' && !inQuotes) { values.push(current); current = ''; } else current += char; } values.push(current); return values.map(v => v.trim()); };
   const headers = parseLine(lines[0]).map(header => header.toLowerCase().trim());
   return lines.slice(1).map(line => { const values = parseLine(line); return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])); });
+}
+
+
+const LIVE_RUN_STORAGE_KEY = 'fytrun-live-run-v1';
+let liveRunTick = null;
+function liveRunElapsedMs() {
+  return Math.max(0, Number(state.liveRun.elapsedMs || 0) + (state.liveRun.running && state.liveRun.startedAtMs ? Date.now() - state.liveRun.startedAtMs : 0));
+}
+function persistLiveRunState() {
+  const payload = { ...state.liveRun, savedAt: Date.now() };
+  try { localStorage.setItem(LIVE_RUN_STORAGE_KEY, JSON.stringify(payload)); } catch (_) { /* non-critical browser storage failure */ }
+}
+function restoreLiveRunState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LIVE_RUN_STORAGE_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return;
+    state.liveRun = {
+      running: Boolean(saved.running),
+      startedAtMs: Number(saved.startedAtMs) || null,
+      elapsedMs: Math.max(0, Number(saved.elapsedMs) || 0),
+      distanceKm: Math.max(0, Number(saved.distanceKm) || 0),
+      type: TYPE_STYLES[saved.type] ? saved.type : 'Easy',
+      routeName: String(saved.routeName || '').slice(0, 80),
+    };
+    if (state.liveRun.running && !state.liveRun.startedAtMs) state.liveRun.running = false;
+  } catch (_) { /* start fresh if browser storage is malformed */ }
+}
+function liveRunStatus() {
+  if (state.liveRun.running) return { label: 'RUNNING NOW', copy: 'Your elapsed time is advancing from the real clock.', state: 'Running', button: 'Pause run', icon: 'pause' };
+  if (liveRunElapsedMs() > 0) return { label: 'PAUSED', copy: 'Your time is held. Resume when you are ready.', state: 'Paused', button: 'Resume run', icon: 'play' };
+  return { label: 'READY WHEN YOU ARE', copy: 'Press start when you move. Add distance whenever you know it.', state: 'Ready', button: 'Start run', icon: 'play' };
+}
+function renderLiveRun() {
+  const elapsedSeconds = Math.floor(liveRunElapsedMs() / 1000);
+  const status = liveRunStatus();
+  const distanceKm = Math.max(0, Number(state.liveRun.distanceKm || 0));
+  const distance = kmToDisplay(distanceKm);
+  const liveDistanceInput = $('#live-run-distance');
+  if (!liveDistanceInput) return;
+  if (document.activeElement !== liveDistanceInput) liveDistanceInput.value = distanceKm > 0 ? Number(distance.toFixed(4)) : '';
+  $('#live-run-type').value = state.liveRun.type || 'Easy';
+  if (document.activeElement !== $('#live-run-route')) $('#live-run-route').value = state.liveRun.routeName || '';
+  $('#live-run-elapsed').textContent = formatDuration(elapsedSeconds);
+  $('#live-run-status').textContent = status.label;
+  $('#live-run-copy').textContent = status.copy;
+  $('#live-run-state-label').textContent = status.state;
+  $('#live-run-pace').textContent = distance > 0 && elapsedSeconds > 0 ? formatPace(elapsedSeconds / distance) : '—';
+  const dot = $('#live-run-status-dot'); dot.classList.toggle('running', state.liveRun.running); dot.classList.toggle('paused', !state.liveRun.running && elapsedSeconds > 0);
+  const startButton = $('#live-run-start-pause');
+  startButton.innerHTML = `<i data-lucide="${status.icon}"></i><span>${status.button}</span>`;
+  $('#live-run-finish').disabled = elapsedSeconds < 1;
+  if (state.liveRun.running && !liveRunTick) liveRunTick = window.setInterval(renderLiveRun, 250);
+  if (!state.liveRun.running && liveRunTick) { window.clearInterval(liveRunTick); liveRunTick = null; }
+  initIcons();
+}
+function toggleLiveRun() {
+  if (state.liveRun.running) {
+    state.liveRun.elapsedMs = liveRunElapsedMs(); state.liveRun.startedAtMs = null; state.liveRun.running = false;
+  } else {
+    state.liveRun.startedAtMs = Date.now(); state.liveRun.running = true;
+  }
+  persistLiveRunState(); renderLiveRun();
+}
+function updateLiveRunDistance() {
+  const distance = Number($('#live-run-distance').value || 0);
+  state.liveRun.distanceKm = distance > 0 ? round(displayToKm(distance), 6) : 0;
+  persistLiveRunState(); renderLiveRun();
+}
+function updateLiveRunMeta() {
+  state.liveRun.type = $('#live-run-type').value || 'Easy'; state.liveRun.routeName = $('#live-run-route').value.trim().slice(0, 80);
+  persistLiveRunState(); renderLiveRun();
+}
+function resetLiveRun() {
+  const hasProgress = liveRunElapsedMs() > 0 || state.liveRun.distanceKm > 0;
+  const performReset = () => {
+    state.liveRun = { running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '' };
+    try { localStorage.removeItem(LIVE_RUN_STORAGE_KEY); } catch (_) { /* non-critical */ }
+    renderLiveRun(); showToast('Live run reset', 'The stopwatch and live details are ready for a fresh start.');
+  };
+  if (hasProgress) showConfirm({ title: 'Reset this live run?', message: 'Its elapsed time and unsaved details will be cleared.', confirmText: 'Reset run', action: performReset }); else performReset();
+}
+function finishLiveRun() {
+  if (state.liveRun.running) toggleLiveRun();
+  const elapsedSeconds = Math.floor(liveRunElapsedMs() / 1000);
+  if (elapsedSeconds < 1) return showToast('Start the timer first', 'The live run needs at least one second before review.', 'error');
+  const h = Math.floor(elapsedSeconds / 3600); const m = Math.floor((elapsedSeconds % 3600) / 60); const s = elapsedSeconds % 60;
+  $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s;
+  $('#run-distance').value = state.liveRun.distanceKm > 0 ? formatUnitInput(state.liveRun.distanceKm, 4) : '';
+  $('#run-date').value = todayISO(); $('#run-type').value = state.liveRun.type || 'Easy'; $('#run-route').value = state.liveRun.routeName || '';
+  state.editingRunId = null; $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="check"></i>Save run';
+  updateRunPreview(); navigateTo('log-run'); initIcons();
+  showToast('Live time added', 'Review distance and optional details, then save the run.');
 }
 
 function bindEvents() {
@@ -1126,12 +1351,15 @@ function bindEvents() {
   });
   $('#run-form').addEventListener('submit', handleRunSubmit);
   ['#run-distance','#run-hours','#run-minutes','#run-seconds','#run-type'].forEach(selector => $(selector).addEventListener('input', updateRunPreview));
+  $('#live-run-start-pause').addEventListener('click', toggleLiveRun); $('#live-run-reset').addEventListener('click', resetLiveRun); $('#live-run-finish').addEventListener('click', finishLiveRun);
+  $('#live-run-distance').addEventListener('input', updateLiveRunDistance); $('#live-run-type').addEventListener('change', updateLiveRunMeta); $('#live-run-route').addEventListener('input', updateLiveRunMeta);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) renderLiveRun(); });
   $('#discard-run-btn').addEventListener('click', () => { state.editingRunId = null; resetRunForm(); showToast('Form cleared', 'Ready whenever your next run is.'); });
   $('#quick-log-btn').addEventListener('click', () => navigateTo('log-run'));
   $('#sidebar-open').addEventListener('click', () => $('#sidebar').classList.add('open'));
   $('#sidebar-close').addEventListener('click', () => $('#sidebar').classList.remove('open'));
   $('#profile-menu-btn').addEventListener('click', () => $('#profile-menu').classList.toggle('hidden'));
-  $('#theme-toggle').addEventListener('click', () => { document.body.classList.toggle('light-theme'); localStorage.setItem('FytRun-theme', document.body.classList.contains('light-theme') ? 'light' : 'dark'); setupChartDefaults(); renderAll(); });
+  $('#theme-toggle').addEventListener('click', () => { document.body.classList.toggle('light-theme'); localStorage.setItem('fytrun-theme', document.body.classList.contains('light-theme') ? 'light' : 'dark'); setupChartDefaults(); renderAll(); });
   $('#sign-out-btn').addEventListener('click', signOut); document.addEventListener('click', event => { if (!event.target.closest('#profile-menu') && !event.target.closest('#profile-menu-btn')) $('#profile-menu').classList.add('hidden'); });
   $('#history-search').addEventListener('input', applyHistoryFilters); ['#filter-run-type','#filter-distance','#history-sort'].forEach(selector => $(selector).addEventListener('change', applyHistoryFilters));
   $('#calendar-prev').addEventListener('click', () => { state.calendarMonth = new Date(state.calendarMonth.getFullYear(), state.calendarMonth.getMonth() - 1, 1); renderCalendar(); });
@@ -1147,10 +1375,12 @@ function bindEvents() {
   document.addEventListener('click', event => handleDelegatedClick(event));
   document.addEventListener('keydown', event => { if (event.key === 'Escape') $$('.modal').forEach(modal => modal.classList.add('hidden')); });
   window.addEventListener('hashchange', () => navigateTo(location.hash.slice(1) || 'dashboard', false));
-  const savedTheme = localStorage.getItem('FytRun-theme'); if (savedTheme === 'light') document.body.classList.add('light-theme');
+  const savedTheme = localStorage.getItem('fytrun-theme'); if (savedTheme === 'light') document.body.classList.add('light-theme');
 }
 
 async function handleDelegatedClick(event) {
+  const unitChoice = event.target.closest('[data-distance-unit-choice]');
+  if (unitChoice) { await setDistanceUnit(unitChoice.dataset.distanceUnitChoice); return; }
   const nav = event.target.closest('[data-view]');
   if (nav && nav.dataset.view) { event.preventDefault(); navigateTo(nav.dataset.view); if (nav.closest('#profile-menu')) $('#profile-menu').classList.add('hidden'); return; }
   const runEl = event.target.closest('[data-run-id]');

@@ -34,7 +34,7 @@
         <div class="auth-copy">
           <p class="eyebrow">RUN WITH INTENTION</p>
           <h1>Your running life,<br /><em>beautifully measured.</em></h1>
-          <p>Track every mile, see the work compound, and keep your people close to the journey.</p>
+          <p>Track every run, see the work compound, and keep your people close to the journey.</p>
         </div>
         <div class="auth-proof">
           <div class="proof-stack">
@@ -44,8 +44,8 @@
         </div>
         <div class="mini-run-card">
           <div><span class="run-type-dot"></span> MORNING BUILD</div>
-          <strong>8.24 <small>km</small></strong>
-          <p>4:46 /km <span>•</span> Easy</p>
+          <strong>5.12 <small>distance</small></strong>
+          <p>7:40 pace <span>•</span> Easy</p>
           <div class="mini-spark"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
         </div>
       </div>
@@ -93,6 +93,7 @@
       <nav class="nav-list" aria-label="Primary navigation">
         <a href="#dashboard" class="nav-link active" data-view="dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
         <a href="#log-run" class="nav-link nav-link-emphasis" data-view="log-run"><i data-lucide="plus"></i><span>Log a run</span></a>
+        <a href="#live-run" class="nav-link" data-view="live-run"><i data-lucide="timer"></i><span>Live run</span></a>
         <a href="#history" class="nav-link" data-view="history"><i data-lucide="route"></i><span>Run history</span></a>
         <a href="#statistics" class="nav-link" data-view="statistics"><i data-lucide="bar-chart-3"></i><span>Statistics</span></a>
         <a href="#progress" class="nav-link" data-view="progress"><i data-lucide="trending-up"></i><span>Progress</span></a>
@@ -136,7 +137,7 @@
             <div>
               <p class="hero-label"><span class="pulse-dot"></span><span id="hero-date-label">TODAY</span></p>
               <h2 id="dashboard-headline">Every run leaves a mark.</h2>
-              <p id="dashboard-subheadline">Your next mile is waiting.</p>
+              <p id="dashboard-subheadline">Your next run is waiting.</p>
             </div>
             <button class="btn btn-soft" type="button" data-view="log-run"><i data-lucide="plus"></i>Log today’s run</button>
           </div>
@@ -156,7 +157,7 @@
             <article class="panel progress-panel">
               <div class="panel-heading"><div><p class="eyebrow">THIS WEEK</p><h3>Weekly goal</h3></div><button class="icon-btn subtle" type="button" data-view="settings" aria-label="Edit goal"><i data-lucide="settings-2"></i></button></div>
               <div class="goal-ring-wrap"><div id="weekly-goal-ring" class="goal-ring"><div class="goal-ring-inner"><strong id="weekly-goal-percent">0%</strong><span>complete</span></div></div></div>
-              <div class="goal-meta"><div><span id="weekly-goal-current">0.0 km</span><small>completed</small></div><div class="goal-meta-right"><span id="weekly-goal-target">/ 30 km</span><small>weekly target</small></div></div>
+              <div class="goal-meta"><div><span id="weekly-goal-current">0.0 mi</span><small>completed</small></div><div class="goal-meta-right"><span id="weekly-goal-target">/ 18.6 mi</span><small>weekly target</small></div></div>
               <div class="goal-insight" id="weekly-goal-insight">Log your first run to start your week.</div>
             </article>
           </div>
@@ -188,7 +189,7 @@
             <form id="run-form" class="panel run-form" novalidate>
               <div class="form-section-heading"><span>01</span><div><h3>Core details</h3><p>The essentials for every run.</p></div></div>
               <div class="form-grid core-form-grid">
-                <label class="form-field large-field">Distance <span class="required">*</span><div class="input-with-unit"><input id="run-distance" name="distance" type="number" min="0.01" step="0.01" placeholder="0.00" required /><span>km</span></div></label>
+                <label class="form-field large-field">Distance <span class="required">*</span><div class="input-with-unit"><input id="run-distance" name="distance" type="number" min="0.000001" step="0.000001" placeholder="0.00" required /><span data-distance-unit>mi</span></div></label>
                 <label class="form-field large-field">Time <span class="required">*</span><div class="time-inputs"><input id="run-hours" aria-label="Hours" type="number" min="0" max="23" value="0" /><span>:</span><input id="run-minutes" aria-label="Minutes" type="number" min="0" max="59" placeholder="00" required /><span>:</span><input id="run-seconds" aria-label="Seconds" type="number" min="0" max="59" placeholder="00" required /></div></label>
               </div>
               <div class="auto-pace-card"><div><span class="auto-icon"><i data-lucide="gauge"></i></span><div><small>LIVE CALCULATION</small><strong id="live-pace">—</strong></div></div><span>average pace</span></div>
@@ -198,7 +199,7 @@
                 <label class="form-field">Date<input id="run-date" type="date" required /></label>
                 <label class="form-field">Run type<select id="run-type"><option value="Easy">Easy</option><option value="Recovery">Recovery</option><option value="Long Run">Long Run</option><option value="Tempo">Tempo</option><option value="Intervals">Intervals</option><option value="Race">Race</option><option value="Trail">Trail</option><option value="Other">Other</option></select></label>
                 <label class="form-field">Route name<input id="run-route" type="text" maxlength="80" placeholder="e.g. Prospect Park loop" /></label>
-                <label class="form-field">Elevation gain<div class="input-with-unit"><input id="run-elevation" type="number" min="0" step="1" placeholder="0" /><span>m</span></div></label>
+                <label class="form-field">Elevation gain<div class="input-with-unit"><input id="run-elevation" type="number" min="0" step="1" placeholder="0" /><span data-elevation-unit>ft</span></div></label>
                 <label class="form-field">Calories<div class="input-with-unit"><input id="run-calories" type="number" min="0" step="1" placeholder="—" /><span>kcal</span></div></label>
                 <label class="form-field">Visibility<select id="run-visibility"><option value="friends">Friends can see this</option><option value="private">Only me</option></select></label>
               </div>
@@ -206,16 +207,53 @@
               <div class="form-actions"><button id="discard-run-btn" class="btn btn-ghost" type="button">Clear form</button><button class="btn btn-primary" type="submit"><i data-lucide="check"></i>Save run</button></div>
             </form>
             <aside class="log-aside">
-              <article class="panel run-preview-card"><p class="eyebrow">RUN PREVIEW</p><div class="preview-orb"><i data-lucide="footprints"></i></div><strong id="preview-distance">0.00 <small>km</small></strong><span id="preview-time">00:00:00</span><div class="preview-divider"></div><div><small>PACE</small><b id="preview-pace">—</b></div><div><small>TYPE</small><b id="preview-type">Easy</b></div></article>
+              <article class="panel run-preview-card"><p class="eyebrow">RUN PREVIEW</p><div class="preview-orb"><i data-lucide="footprints"></i></div><strong id="preview-distance">0.00 <small data-distance-unit>mi</small></strong><span id="preview-time">00:00:00</span><div class="preview-divider"></div><div><small>PACE</small><b id="preview-pace">—</b></div><div><small>TYPE</small><b id="preview-type">Easy</b></div></article>
               <article class="insight-card"><span class="insight-icon"><i data-lucide="trophy"></i></span><div><strong id="potential-pr-title">A new page, every run.</strong><p id="potential-pr-copy">Your personal records will surface here as you build your history.</p></div></article>
+            </aside>
+          </div>
+        </section>
+
+
+
+        <!-- Live Run Stopwatch -->
+        <section id="view-live-run" class="view">
+          <div class="split-view-heading">
+            <div><p class="eyebrow">LIVE ACTIVITY</p><h2>Run in the moment.</h2><p>Use a focused, timestamp-based stopwatch, then send the elapsed time straight into your run log.</p></div>
+            <div class="pace-prompt"><i data-lucide="timer-reset"></i><span>The timer catches up from the real clock after backgrounding or a refresh.</span></div>
+          </div>
+          <div class="live-run-layout">
+            <article class="panel live-run-stage">
+              <div class="live-run-stage-top">
+                <div><p class="eyebrow live-status-line"><span id="live-run-status-dot" class="live-status-dot"></span><span id="live-run-status">READY WHEN YOU ARE</span></p><h3>Live run stopwatch</h3></div>
+                <button id="live-run-reset" class="icon-btn subtle" type="button" aria-label="Reset live run"><i data-lucide="rotate-ccw"></i></button>
+              </div>
+              <div id="live-run-elapsed" class="live-run-elapsed" role="timer" aria-live="off">00:00:00</div>
+              <p id="live-run-copy" class="live-run-copy">Press start when you move. Add distance whenever you know it.</p>
+              <div class="live-run-controls">
+                <button id="live-run-start-pause" class="btn btn-primary live-run-main-btn" type="button"><i data-lucide="play"></i><span>Start run</span></button>
+                <button id="live-run-finish" class="btn btn-soft" type="button" disabled><i data-lucide="check-circle-2"></i><span>Finish &amp; review</span></button>
+              </div>
+              <div class="live-run-trust-row"><span><i data-lucide="clock-3"></i> Timestamp-based timing</span><span><i data-lucide="refresh-cw"></i> Restores after refresh</span></div>
+            </article>
+            <aside class="live-run-aside">
+              <article class="panel live-distance-panel">
+                <div class="panel-heading"><div><p class="eyebrow">LIVE DETAILS</p><h3>Your effort</h3></div></div>
+                <div class="live-distance-form">
+                  <label class="form-field">Distance completed<div class="input-with-unit"><input id="live-run-distance" type="number" min="0" step="0.000001" inputmode="decimal" placeholder="0.00" /><span data-distance-unit>mi</span></div></label>
+                  <label class="form-field">Run type<select id="live-run-type"><option value="Easy">Easy</option><option value="Recovery">Recovery</option><option value="Long Run">Long Run</option><option value="Tempo">Tempo</option><option value="Intervals">Intervals</option><option value="Race">Race</option><option value="Trail">Trail</option><option value="Other">Other</option></select></label>
+                  <label class="form-field full-field">Route name <span class="optional-label">optional</span><input id="live-run-route" type="text" maxlength="80" placeholder="e.g. East River loop" /></label>
+                </div>
+                <div class="live-pace-block"><span><small>LIVE PACE</small><strong id="live-run-pace">—</strong></span><span><small>STATUS</small><strong id="live-run-state-label">Ready</strong></span></div>
+              </article>
+              <article class="live-run-note"><span><i data-lucide="shield-check"></i></span><div><strong>You stay in control.</strong><p>FytRun does not guess your route or distance. Enter the distance you actually completed, then review all details before saving.</p></div></article>
             </aside>
           </div>
         </section>
 
         <!-- History -->
         <section id="view-history" class="view">
-          <div class="view-heading"><div><p class="eyebrow">YOUR ARCHIVE</p><h2>Run history</h2><p id="history-summary">Every kilometer you’ve logged, in one place.</p></div><button class="btn btn-primary" type="button" data-view="log-run"><i data-lucide="plus"></i>Log run</button></div>
-          <div class="panel filters-panel"><div class="filter-row"><label class="search-field"><i data-lucide="search"></i><input id="history-search" type="search" placeholder="Search route or notes" /></label><select id="filter-run-type"><option value="all">All run types</option><option value="Easy">Easy</option><option value="Recovery">Recovery</option><option value="Long Run">Long Run</option><option value="Tempo">Tempo</option><option value="Intervals">Intervals</option><option value="Race">Race</option><option value="Trail">Trail</option><option value="Other">Other</option></select><select id="filter-distance"><option value="all">Any distance</option><option value="under5">Under 5 km</option><option value="5to10">5–10 km</option><option value="10to21">10–21.1 km</option><option value="over21">Half marathon+</option></select><select id="history-sort"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="distance-desc">Longest first</option><option value="pace-asc">Fastest pace</option></select></div></div>
+          <div class="view-heading"><div><p class="eyebrow">YOUR ARCHIVE</p><h2>Run history</h2><p id="history-summary">Every run you’ve logged, in one place.</p></div><button class="btn btn-primary" type="button" data-view="log-run"><i data-lucide="plus"></i>Log run</button></div>
+          <div class="panel filters-panel"><div class="filter-row"><label class="search-field"><i data-lucide="search"></i><input id="history-search" type="search" placeholder="Search route or notes" /></label><select id="filter-run-type"><option value="all">All run types</option><option value="Easy">Easy</option><option value="Recovery">Recovery</option><option value="Long Run">Long Run</option><option value="Tempo">Tempo</option><option value="Intervals">Intervals</option><option value="Race">Race</option><option value="Trail">Trail</option><option value="Other">Other</option></select><select id="filter-distance"><option value="all">Any distance</option><option value="under3">Under 3 mi</option><option value="3to6">3–6.2 mi</option><option value="6to13">6.2–13.1 mi</option><option value="over13">Half marathon+</option></select><select id="history-sort"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="distance-desc">Longest first</option><option value="pace-asc">Fastest pace</option></select></div></div>
           <div id="history-list" class="run-history-list"></div>
         </section>
 
@@ -236,7 +274,7 @@
         <section id="view-progress" class="view">
           <div class="view-heading"><div><p class="eyebrow">THE LONG VIEW</p><h2>Progress</h2><p>Trace your fitness, not just your finish lines.</p></div><div class="segmented" data-range-control="progress"><button type="button" class="active" data-range="90">3 months</button><button type="button" data-range="180">6 months</button><button type="button" data-range="365">1 year</button><button type="button" data-range="all">All time</button></div></div>
           <div class="progress-charts-grid">
-            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">VOLUME</p><h3>Weekly mileage</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="weekly-mileage-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="weekly-mileage-chart"></canvas></div></article>
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">VOLUME</p><h3>Weekly distance</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="weekly-mileage-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="weekly-mileage-chart"></canvas></div></article>
             <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">EFFICIENCY</p><h3>Average pace</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="pace-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="pace-chart"></canvas></div></article>
             <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">ENDURANCE</p><h3>Longest runs</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="longest-runs-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="longest-runs-chart"></canvas></div></article>
             <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">RECORD BOOK</p><h3>PR progression</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="pr-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="pr-chart"></canvas></div></article>
@@ -246,7 +284,7 @@
 
         <!-- Friends -->
         <section id="view-friends" class="view">
-          <div class="view-heading"><div><p class="eyebrow">YOUR RUNNING CIRCLE</p><h2>Friends</h2><p>Keep the people who make the miles better close.</p></div></div>
+          <div class="view-heading"><div><p class="eyebrow">YOUR RUNNING CIRCLE</p><h2>Friends</h2><p>Keep the people who make every run better close.</p></div></div>
           <div class="friends-layout">
             <div>
               <article class="panel find-runners-panel"><div class="panel-heading"><div><p class="eyebrow">FIND RUNNERS</p><h3>Grow your circle</h3></div></div><div class="friend-search-row"><label class="search-field"><i data-lucide="search"></i><input id="friend-search" type="search" placeholder="Search by name or email" /></label><button id="friend-search-btn" class="btn btn-primary" type="button">Search</button></div><div id="friend-search-results" class="friend-search-results"></div></article>
@@ -280,7 +318,8 @@
         <section id="view-settings" class="view">
           <div class="view-heading"><div><p class="eyebrow">YOUR PREFERENCES</p><h2>Settings</h2><p>Make FytRun feel like your training space.</p></div></div>
           <div class="settings-layout">
-            <form id="goal-settings-form" class="panel settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="target"></i></span><div><h3>Training goals</h3><p>Set a simple volume target and keep it visible.</p></div></div><div class="form-grid two"><label class="form-field">Weekly distance goal<div class="input-with-unit"><input id="settings-weekly-goal" type="number" min="1" step="1" /><span>km</span></div></label><label class="form-field">Monthly distance goal<div class="input-with-unit"><input id="settings-monthly-goal" type="number" min="1" step="1" /><span>km</span></div></label></div><button class="btn btn-primary" type="submit">Save goals</button></form>
+            <article class="panel settings-panel unit-settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="ruler"></i></span><div><h3>Units</h3><p>Switch any time. FytRun preserves runs and goals in their original exact values.</p></div></div><div class="unit-choice-group" role="group" aria-label="Distance units"><button class="unit-choice" type="button" data-distance-unit-choice="mi"><span><i data-lucide="milestone"></i>Miles</span><small>mi · min/mi · ft</small></button><button class="unit-choice" type="button" data-distance-unit-choice="km"><span><i data-lucide="map-pin"></i>Kilometers</span><small>km · min/km · m</small></button></div><p class="unit-settings-note">The database always keeps canonical kilometers and meters; changing this only changes what you enter and see.</p></article>
+            <form id="goal-settings-form" class="panel settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="target"></i></span><div><h3>Training goals</h3><p>Set a simple volume target and keep it visible.</p></div></div><div class="form-grid two"><label class="form-field">Weekly distance goal<div class="input-with-unit"><input id="settings-weekly-goal" type="number" min="0.000001" step="0.000001" /><span data-distance-unit>mi</span></div></label><label class="form-field">Monthly distance goal<div class="input-with-unit"><input id="settings-monthly-goal" type="number" min="0.000001" step="0.000001" /><span data-distance-unit>mi</span></div></label></div><button class="btn btn-primary" type="submit">Save goals</button></form>
             <form id="privacy-settings-form" class="panel settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="shield-check"></i></span><div><h3>Activity privacy</h3><p>Choose what your accepted friends can view.</p></div></div><label class="toggle-row"><div><strong>Share activity with friends</strong><p>Friends can view your runs and public stats.</p></div><input id="settings-share-activity" type="checkbox" /><span class="toggle-ui"></span></label><button class="btn btn-primary" type="submit">Save privacy</button></form>
             <article class="panel settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="database"></i></span><div><h3>Your data</h3><p>Export a portable record of every run you have logged.</p></div></div><div class="settings-actions"><button id="settings-export-btn" class="btn btn-soft" type="button"><i data-lucide="download"></i>Export runs CSV</button><label class="btn btn-ghost file-button"><i data-lucide="upload"></i>Import runs CSV<input id="import-csv-input" type="file" accept=".csv,text/csv" hidden /></label></div></article>
             <article class="panel settings-panel danger-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="triangle-alert"></i></span><div><h3>Danger zone</h3><p>These actions are permanent. Please be deliberate.</p></div></div><div class="settings-actions"><button id="change-password-btn" class="btn btn-ghost" type="button">Change password</button><button id="delete-account-btn" class="btn btn-danger" type="button">Delete account</button></div></article>
