@@ -1,5 +1,5 @@
 /*
- * Paceforge
+ * FytRun
  * Netlify static frontend + Supabase Auth / Postgres / Storage.
  *
  * 1) Create a Supabase project.
@@ -266,7 +266,7 @@ function setAuthMessage(message = '', isError = true) {
 }
 
 function showConfigurationMessage() {
-  $('#auth-title').textContent = 'Connect Paceforge';
+  $('#auth-title').textContent = 'Connect FytRun';
   $('#auth-subtitle').textContent = 'Add your Supabase URL and publishable key in script.js to activate cloud accounts and permanent data.';
   $('#sign-in-form').classList.add('hidden');
   $('#register-form').classList.add('hidden');
@@ -1062,7 +1062,7 @@ async function saveProfile(event) {
       const { error: emailError } = await supabase.auth.updateUser({ email });
       if (emailError) throw emailError;
       showToast('Profile saved', 'Confirm the email-change message sent to your inbox.');
-    } else showToast('Profile saved', 'Your Paceforge profile is up to date.');
+    } else showToast('Profile saved', 'Your FytRun profile is up to date.');
     state.profile = { ...data, settings: data.settings || {} }; closeModal('profile-modal'); renderAll();
   } catch (error) { showToast('Could not save profile', error.message, 'error'); }
   finally { submit.disabled = false; }
@@ -1077,7 +1077,7 @@ async function deleteAccount() {
     try {
       const { error } = await supabase.functions.invoke('delete-account');
       if (error) throw error;
-      await supabase.auth.signOut(); showToast('Account deleted', 'Your Paceforge data has been removed.');
+      await supabase.auth.signOut(); showToast('Account deleted', 'Your FytRun data has been removed.');
     } catch (error) { showToast('Could not delete account', 'Deploy the included delete-account Edge Function, then try again. ' + (error.message || ''), 'error'); }
   }});
 }
@@ -1087,7 +1087,7 @@ function exportCSV() {
   const headers = ['date','distance_km','duration_seconds','pace_per_km','run_type','route_name','elevation_m','calories','visibility','notes'];
   const rows = state.runs.map(run => [run.date, run.distance_km, run.duration_seconds, Math.round(getPace(run)), run.run_type || '', run.route_name || '', run.elevation_m || 0, run.calories || 0, run.visibility || 'friends', run.notes || '']);
   const csv = [headers, ...rows].map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-  downloadFile(csv, `paceforge-runs-${todayISO()}.csv`, 'text/csv;charset=utf-8'); showToast('Export ready', `${state.runs.length} runs exported to CSV.`);
+  downloadFile(csv, `FytRun-runs-${todayISO()}.csv`, 'text/csv;charset=utf-8'); showToast('Export ready', `${state.runs.length} runs exported to CSV.`);
 }
 function downloadFile(content, filename, type) { const url = URL.createObjectURL(new Blob([content], { type })); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
 async function importCSV(file) {
@@ -1131,7 +1131,7 @@ function bindEvents() {
   $('#sidebar-open').addEventListener('click', () => $('#sidebar').classList.add('open'));
   $('#sidebar-close').addEventListener('click', () => $('#sidebar').classList.remove('open'));
   $('#profile-menu-btn').addEventListener('click', () => $('#profile-menu').classList.toggle('hidden'));
-  $('#theme-toggle').addEventListener('click', () => { document.body.classList.toggle('light-theme'); localStorage.setItem('paceforge-theme', document.body.classList.contains('light-theme') ? 'light' : 'dark'); setupChartDefaults(); renderAll(); });
+  $('#theme-toggle').addEventListener('click', () => { document.body.classList.toggle('light-theme'); localStorage.setItem('FytRun-theme', document.body.classList.contains('light-theme') ? 'light' : 'dark'); setupChartDefaults(); renderAll(); });
   $('#sign-out-btn').addEventListener('click', signOut); document.addEventListener('click', event => { if (!event.target.closest('#profile-menu') && !event.target.closest('#profile-menu-btn')) $('#profile-menu').classList.add('hidden'); });
   $('#history-search').addEventListener('input', applyHistoryFilters); ['#filter-run-type','#filter-distance','#history-sort'].forEach(selector => $(selector).addEventListener('change', applyHistoryFilters));
   $('#calendar-prev').addEventListener('click', () => { state.calendarMonth = new Date(state.calendarMonth.getFullYear(), state.calendarMonth.getMonth() - 1, 1); renderCalendar(); });
@@ -1147,7 +1147,7 @@ function bindEvents() {
   document.addEventListener('click', event => handleDelegatedClick(event));
   document.addEventListener('keydown', event => { if (event.key === 'Escape') $$('.modal').forEach(modal => modal.classList.add('hidden')); });
   window.addEventListener('hashchange', () => navigateTo(location.hash.slice(1) || 'dashboard', false));
-  const savedTheme = localStorage.getItem('paceforge-theme'); if (savedTheme === 'light') document.body.classList.add('light-theme');
+  const savedTheme = localStorage.getItem('FytRun-theme'); if (savedTheme === 'light') document.body.classList.add('light-theme');
 }
 
 async function handleDelegatedClick(event) {
