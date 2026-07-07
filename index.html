@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Paceforge — a premium, social running tracker." />
+  <meta name="theme-color" content="#0b0d12" />
+  <title>Paceforge — Run with purpose</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div id="noise"></div>
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Authentication -->
+  <section id="auth-screen" class="auth-screen">
+    <div class="auth-orb auth-orb-one"></div>
+    <div class="auth-orb auth-orb-two"></div>
+    <div class="auth-layout">
+      <div class="auth-brand-panel">
+        <a class="brand auth-brand" href="#" aria-label="Paceforge home">
+          <span class="brand-mark"><i data-lucide="activity"></i></span>
+          <span>Pace<span>forge</span></span>
+        </a>
+        <div class="auth-copy">
+          <p class="eyebrow">RUN WITH INTENTION</p>
+          <h1>Your running life,<br /><em>beautifully measured.</em></h1>
+          <p>Track every mile, see the work compound, and keep your people close to the journey.</p>
+        </div>
+        <div class="auth-proof">
+          <div class="proof-stack">
+            <span class="proof-avatar warm">A</span><span class="proof-avatar blue">J</span><span class="proof-avatar green">M</span>
+          </div>
+          <p>Built for runners who care about the details.</p>
+        </div>
+        <div class="mini-run-card">
+          <div><span class="run-type-dot"></span> MORNING BUILD</div>
+          <strong>8.24 <small>km</small></strong>
+          <p>4:46 /km <span>•</span> Easy</p>
+          <div class="mini-spark"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+      </div>
+
+      <div class="auth-card-wrap">
+        <div class="auth-card">
+          <div class="auth-card-heading">
+            <p class="eyebrow">YOUR RUNNING SPACE</p>
+            <h2 id="auth-title">Welcome back</h2>
+            <p id="auth-subtitle">Sign in to continue your training.</p>
+          </div>
+
+          <form id="sign-in-form" class="auth-form" novalidate>
+            <label>Email<input id="sign-in-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required /></label>
+            <label>Password<input id="sign-in-password" name="password" type="password" placeholder="Your password" autocomplete="current-password" required /></label>
+            <button class="btn btn-primary btn-full" type="submit"><span>Sign in</span><i data-lucide="arrow-right"></i></button>
+          </form>
+
+          <form id="register-form" class="auth-form hidden" novalidate>
+            <label>Display name<input id="register-name" name="name" type="text" placeholder="How runners see you" autocomplete="name" maxlength="40" required /></label>
+            <label>Email<input id="register-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required /></label>
+            <label>Password<input id="register-password" name="password" type="password" placeholder="At least 8 characters" autocomplete="new-password" minlength="8" required /></label>
+            <button class="btn btn-primary btn-full" type="submit"><span>Create my account</span><i data-lucide="arrow-right"></i></button>
+          </form>
+
+          <button id="auth-switch" class="text-button auth-switch" type="button">New here? <strong>Create an account</strong></button>
+          <p id="auth-message" class="auth-message" role="status"></p>
+          <p class="auth-footnote">Your runs are yours. Your data is stored securely in your private account.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main app -->
+  <main id="app-shell" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-top">
+        <a class="brand" href="#dashboard" data-view="dashboard">
+          <span class="brand-mark"><i data-lucide="activity"></i></span>
+          <span>Pace<span>forge</span></span>
+        </a>
+        <button id="sidebar-close" class="icon-btn mobile-only" type="button" aria-label="Close menu"><i data-lucide="x"></i></button>
+      </div>
+
+      <nav class="nav-list" aria-label="Primary navigation">
+        <a href="#dashboard" class="nav-link active" data-view="dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
+        <a href="#log-run" class="nav-link nav-link-emphasis" data-view="log-run"><i data-lucide="plus"></i><span>Log a run</span></a>
+        <a href="#history" class="nav-link" data-view="history"><i data-lucide="route"></i><span>Run history</span></a>
+        <a href="#statistics" class="nav-link" data-view="statistics"><i data-lucide="bar-chart-3"></i><span>Statistics</span></a>
+        <a href="#progress" class="nav-link" data-view="progress"><i data-lucide="trending-up"></i><span>Progress</span></a>
+        <a href="#friends" class="nav-link" data-view="friends"><i data-lucide="users-round"></i><span>Friends</span><span id="request-badge" class="nav-badge hidden">0</span></a>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <nav class="nav-list nav-secondary" aria-label="Account navigation">
+        <a href="#profile" class="nav-link" data-view="profile"><i data-lucide="circle-user-round"></i><span>Profile</span></a>
+        <a href="#settings" class="nav-link" data-view="settings"><i data-lucide="settings-2"></i><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-user" id="sidebar-user"></div>
+    </aside>
+
+    <section class="main-shell">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="sidebar-open" class="icon-btn mobile-only" type="button" aria-label="Open menu"><i data-lucide="menu"></i></button>
+          <div>
+            <p id="page-kicker" class="eyebrow">OVERVIEW</p>
+            <h1 id="page-title">Good afternoon, runner.</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button id="quick-log-btn" class="btn btn-primary desktop-quick-log" type="button"><i data-lucide="plus"></i><span>Log run</span></button>
+          <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle color theme"><i data-lucide="sun-moon"></i></button>
+          <button id="profile-menu-btn" class="profile-trigger" type="button" aria-label="Open account menu"><span id="topbar-avatar" class="avatar avatar-image">R</span><i data-lucide="chevron-down"></i></button>
+          <div id="profile-menu" class="profile-menu hidden">
+            <button type="button" data-view="profile"><i data-lucide="user-round"></i>My profile</button>
+            <button type="button" data-view="settings"><i data-lucide="settings-2"></i>Settings</button>
+            <hr />
+            <button id="sign-out-btn" class="danger-option" type="button"><i data-lucide="log-out"></i>Sign out</button>
+          </div>
+        </div>
+      </header>
+
+      <div id="app-content" class="app-content">
+        <!-- Dashboard -->
+        <section id="view-dashboard" class="view active-view">
+          <div class="dashboard-hero">
+            <div>
+              <p class="hero-label"><span class="pulse-dot"></span><span id="hero-date-label">TODAY</span></p>
+              <h2 id="dashboard-headline">Every run leaves a mark.</h2>
+              <p id="dashboard-subheadline">Your next mile is waiting.</p>
+            </div>
+            <button class="btn btn-soft" type="button" data-view="log-run"><i data-lucide="plus"></i>Log today’s run</button>
+          </div>
+
+          <div id="summary-stats" class="summary-stats"></div>
+
+          <div class="dashboard-grid dashboard-grid-main">
+            <article class="panel chart-panel wide-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">CONSISTENCY</p><h3>Distance over time</h3></div>
+                <div class="panel-controls segmented" data-range-control="dashboard-distance">
+                  <button type="button" class="active" data-range="30">30D</button><button type="button" data-range="90">3M</button><button type="button" data-range="365">1Y</button><button type="button" data-range="all">ALL</button>
+                </div>
+              </div>
+              <div class="chart-wrap"><canvas id="dashboard-distance-chart"></canvas></div>
+            </article>
+            <article class="panel progress-panel">
+              <div class="panel-heading"><div><p class="eyebrow">THIS WEEK</p><h3>Weekly goal</h3></div><button class="icon-btn subtle" type="button" data-view="settings" aria-label="Edit goal"><i data-lucide="settings-2"></i></button></div>
+              <div class="goal-ring-wrap"><div id="weekly-goal-ring" class="goal-ring"><div class="goal-ring-inner"><strong id="weekly-goal-percent">0%</strong><span>complete</span></div></div></div>
+              <div class="goal-meta"><div><span id="weekly-goal-current">0.0 km</span><small>completed</small></div><div class="goal-meta-right"><span id="weekly-goal-target">/ 30 km</span><small>weekly target</small></div></div>
+              <div class="goal-insight" id="weekly-goal-insight">Log your first run to start your week.</div>
+            </article>
+          </div>
+
+          <div class="dashboard-grid dashboard-grid-secondary">
+            <article class="panel activity-panel">
+              <div class="panel-heading"><div><p class="eyebrow">YOUR RUNS</p><h3>Recent activity</h3></div><button class="text-button" type="button" data-view="history">View all <i data-lucide="arrow-up-right"></i></button></div>
+              <div id="recent-activity" class="activity-list"></div>
+            </article>
+            <article class="panel prs-panel">
+              <div class="panel-heading"><div><p class="eyebrow">PERSONAL BESTS</p><h3>Records to chase</h3></div><button class="text-button" type="button" data-view="statistics">See stats <i data-lucide="arrow-up-right"></i></button></div>
+              <div id="dashboard-prs" class="mini-pr-grid"></div>
+            </article>
+          </div>
+
+          <article class="panel calendar-panel">
+            <div class="panel-heading"><div><p class="eyebrow">RHYTHM</p><h3>Training calendar</h3></div><div id="calendar-month-switch" class="calendar-switch"><button id="calendar-prev" class="icon-btn subtle" type="button" aria-label="Previous month"><i data-lucide="chevron-left"></i></button><span id="calendar-month-label"></span><button id="calendar-next" class="icon-btn subtle" type="button" aria-label="Next month"><i data-lucide="chevron-right"></i></button></div></div>
+            <div id="calendar-grid" class="calendar-grid"></div>
+          </article>
+        </section>
+
+        <!-- Log Run -->
+        <section id="view-log-run" class="view">
+          <div class="split-view-heading">
+            <div><p class="eyebrow">NEW ACTIVITY</p><h2>Log the work.</h2><p>A clear record makes the next effort smarter.</p></div>
+            <div class="pace-prompt"><i data-lucide="sparkles"></i><span>Runs update your streak, records, charts, and goals instantly.</span></div>
+          </div>
+          <div class="log-run-layout">
+            <form id="run-form" class="panel run-form" novalidate>
+              <div class="form-section-heading"><span>01</span><div><h3>Core details</h3><p>The essentials for every run.</p></div></div>
+              <div class="form-grid core-form-grid">
+                <label class="form-field large-field">Distance <span class="required">*</span><div class="input-with-unit"><input id="run-distance" name="distance" type="number" min="0.01" step="0.01" placeholder="0.00" required /><span>km</span></div></label>
+                <label class="form-field large-field">Time <span class="required">*</span><div class="time-inputs"><input id="run-hours" aria-label="Hours" type="number" min="0" max="23" value="0" /><span>:</span><input id="run-minutes" aria-label="Minutes" type="number" min="0" max="59" placeholder="00" required /><span>:</span><input id="run-seconds" aria-label="Seconds" type="number" min="0" max="59" placeholder="00" required /></div></label>
+              </div>
+              <div class="auto-pace-card"><div><span class="auto-icon"><i data-lucide="gauge"></i></span><div><small>LIVE CALCULATION</small><strong id="live-pace">—</strong></div></div><span>average pace</span></div>
+
+              <div class="form-section-heading compact"><span>02</span><div><h3>Run context</h3><p>Optional, but useful in the long view.</p></div></div>
+              <div class="form-grid">
+                <label class="form-field">Date<input id="run-date" type="date" required /></label>
+                <label class="form-field">Run type<select id="run-type"><option value="Easy">Easy</option><option value="Recovery">Recovery</option><option value="Long Run">Long Run</option><option value="Tempo">Tempo</option><option value="Intervals">Intervals</option><option value="Race">Race</option><option value="Trail">Trail</option><option value="Other">Other</option></select></label>
+                <label class="form-field">Route name<input id="run-route" type="text" maxlength="80" placeholder="e.g. Prospect Park loop" /></label>
+                <label class="form-field">Elevation gain<div class="input-with-unit"><input id="run-elevation" type="number" min="0" step="1" placeholder="0" /><span>m</span></div></label>
+                <label class="form-field">Calories<div class="input-with-unit"><input id="run-calories" type="number" min="0" step="1" placeholder="—" /><span>kcal</span></div></label>
+                <label class="form-field">Visibility<select id="run-visibility"><option value="friends">Friends can see this</option><option value="private">Only me</option></select></label>
+              </div>
+              <label class="form-field full-field">Notes<textarea id="run-notes" rows="4" maxlength="1000" placeholder="How did it feel? What worked? Anything worth remembering?"></textarea></label>
+              <div class="form-actions"><button id="discard-run-btn" class="btn btn-ghost" type="button">Clear form</button><button class="btn btn-primary" type="submit"><i data-lucide="check"></i>Save run</button></div>
+            </form>
+            <aside class="log-aside">
+              <article class="panel run-preview-card"><p class="eyebrow">RUN PREVIEW</p><div class="preview-orb"><i data-lucide="footprints"></i></div><strong id="preview-distance">0.00 <small>km</small></strong><span id="preview-time">00:00:00</span><div class="preview-divider"></div><div><small>PACE</small><b id="preview-pace">—</b></div><div><small>TYPE</small><b id="preview-type">Easy</b></div></article>
+              <article class="insight-card"><span class="insight-icon"><i data-lucide="trophy"></i></span><div><strong id="potential-pr-title">A new page, every run.</strong><p id="potential-pr-copy">Your personal records will surface here as you build your history.</p></div></article>
+            </aside>
+          </div>
+        </section>
+
+        <!-- History -->
+        <section id="view-history" class="view">
+          <div class="view-heading"><div><p class="eyebrow">YOUR ARCHIVE</p><h2>Run history</h2><p id="history-summary">Every kilometer you’ve logged, in one place.</p></div><button class="btn btn-primary" type="button" data-view="log-run"><i data-lucide="plus"></i>Log run</button></div>
+          <div class="panel filters-panel"><div class="filter-row"><label class="search-field"><i data-lucide="search"></i><input id="history-search" type="search" placeholder="Search route or notes" /></label><select id="filter-run-type"><option value="all">All run types</option><option value="Easy">Easy</option><option value="Recovery">Recovery</option><option value="Long Run">Long Run</option><option value="Tempo">Tempo</option><option value="Intervals">Intervals</option><option value="Race">Race</option><option value="Trail">Trail</option><option value="Other">Other</option></select><select id="filter-distance"><option value="all">Any distance</option><option value="under5">Under 5 km</option><option value="5to10">5–10 km</option><option value="10to21">10–21.1 km</option><option value="over21">Half marathon+</option></select><select id="history-sort"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="distance-desc">Longest first</option><option value="pace-asc">Fastest pace</option></select></div></div>
+          <div id="history-list" class="run-history-list"></div>
+        </section>
+
+        <!-- Statistics -->
+        <section id="view-statistics" class="view">
+          <div class="view-heading"><div><p class="eyebrow">THE DETAILS</p><h2>Statistics</h2><p>Your complete training picture, without the noise.</p></div><button id="export-csv-btn" class="btn btn-soft" type="button"><i data-lucide="download"></i>Export CSV</button></div>
+          <div id="statistics-cards" class="stat-card-grid"></div>
+          <div class="stats-dashboard-grid">
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">FREQUENCY</p><h3>Running frequency</h3></div><span class="panel-note">Runs / week</span></div><div class="chart-wrap"><canvas id="frequency-chart"></canvas></div></article>
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">TIME ON FEET</p><h3>Time spent running</h3></div><span class="panel-note">Hours / month</span></div><div class="chart-wrap"><canvas id="time-chart"></canvas></div></article>
+          </div>
+          <article class="panel records-panel"><div class="panel-heading"><div><p class="eyebrow">PERSONAL RECORDS</p><h3>Your record book</h3></div><span class="panel-note">Tap a record to inspect the run</span></div><div id="full-pr-grid" class="record-grid"></div></article>
+          <article class="panel heatmap-panel"><div class="panel-heading"><div><p class="eyebrow">CONSISTENCY MAP</p><h3>Activity heatmap</h3></div><div class="heatmap-legend"><span>Less</span><i></i><i></i><i></i><i></i><span>More</span></div></div><div id="heatmap" class="heatmap"></div></article>
+          <article class="panel"><div class="panel-heading"><div><p class="eyebrow">MOMENTUM</p><h3>Achievements</h3></div><span class="panel-note">Earned through action</span></div><div id="achievement-grid" class="achievement-grid"></div></article>
+        </section>
+
+        <!-- Progress -->
+        <section id="view-progress" class="view">
+          <div class="view-heading"><div><p class="eyebrow">THE LONG VIEW</p><h2>Progress</h2><p>Trace your fitness, not just your finish lines.</p></div><div class="segmented" data-range-control="progress"><button type="button" class="active" data-range="90">3 months</button><button type="button" data-range="180">6 months</button><button type="button" data-range="365">1 year</button><button type="button" data-range="all">All time</button></div></div>
+          <div class="progress-charts-grid">
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">VOLUME</p><h3>Weekly mileage</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="weekly-mileage-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="weekly-mileage-chart"></canvas></div></article>
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">EFFICIENCY</p><h3>Average pace</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="pace-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="pace-chart"></canvas></div></article>
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">ENDURANCE</p><h3>Longest runs</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="longest-runs-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="longest-runs-chart"></canvas></div></article>
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">RECORD BOOK</p><h3>PR progression</h3></div><button class="icon-btn subtle reset-chart" type="button" data-chart="pr-chart" aria-label="Reset chart zoom"><i data-lucide="rotate-ccw"></i></button></div><div class="chart-wrap"><canvas id="pr-chart"></canvas></div></article>
+          </div>
+          <div class="progress-note"><i data-lucide="mouse-pointer-2"></i><span>Scroll or pinch any chart to zoom. Drag to pan. Use the reset icon to return to the full view.</span></div>
+        </section>
+
+        <!-- Friends -->
+        <section id="view-friends" class="view">
+          <div class="view-heading"><div><p class="eyebrow">YOUR RUNNING CIRCLE</p><h2>Friends</h2><p>Keep the people who make the miles better close.</p></div></div>
+          <div class="friends-layout">
+            <div>
+              <article class="panel find-runners-panel"><div class="panel-heading"><div><p class="eyebrow">FIND RUNNERS</p><h3>Grow your circle</h3></div></div><div class="friend-search-row"><label class="search-field"><i data-lucide="search"></i><input id="friend-search" type="search" placeholder="Search by name or email" /></label><button id="friend-search-btn" class="btn btn-primary" type="button">Search</button></div><div id="friend-search-results" class="friend-search-results"></div></article>
+              <article class="panel friends-panel"><div class="panel-heading"><div><p class="eyebrow">YOUR FRIENDS</p><h3>On the road with you</h3></div><span id="friends-count" class="panel-note">0 friends</span></div><div id="friends-list" class="friends-list"></div></article>
+            </div>
+            <aside>
+              <article class="panel requests-panel"><div class="panel-heading"><div><p class="eyebrow">INCOMING</p><h3>Requests</h3></div><span id="requests-count" class="panel-note">0 pending</span></div><div id="requests-list" class="requests-list"></div></article>
+              <article class="friend-callout"><span><i data-lucide="medal"></i></span><h3>Train together, even apart.</h3><p>See friends’ public activity, celebrate milestones, and compare the training that gets you there.</p></article>
+            </aside>
+          </div>
+        </section>
+
+        <!-- Friend Profile -->
+        <section id="view-friend-profile" class="view">
+          <button id="back-to-friends" class="back-button" type="button"><i data-lucide="arrow-left"></i>Back to friends</button>
+          <div id="friend-profile-content"></div>
+        </section>
+
+        <!-- Compare -->
+        <section id="view-compare" class="view">
+          <button id="back-to-friend-profile" class="back-button" type="button"><i data-lucide="arrow-left"></i>Back to profile</button>
+          <div id="compare-content"></div>
+        </section>
+
+        <!-- Profile -->
+        <section id="view-profile" class="view">
+          <div id="profile-content"></div>
+        </section>
+
+        <!-- Settings -->
+        <section id="view-settings" class="view">
+          <div class="view-heading"><div><p class="eyebrow">YOUR PREFERENCES</p><h2>Settings</h2><p>Make Paceforge feel like your training space.</p></div></div>
+          <div class="settings-layout">
+            <form id="goal-settings-form" class="panel settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="target"></i></span><div><h3>Training goals</h3><p>Set a simple volume target and keep it visible.</p></div></div><div class="form-grid two"><label class="form-field">Weekly distance goal<div class="input-with-unit"><input id="settings-weekly-goal" type="number" min="1" step="1" /><span>km</span></div></label><label class="form-field">Monthly distance goal<div class="input-with-unit"><input id="settings-monthly-goal" type="number" min="1" step="1" /><span>km</span></div></label></div><button class="btn btn-primary" type="submit">Save goals</button></form>
+            <form id="privacy-settings-form" class="panel settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="shield-check"></i></span><div><h3>Activity privacy</h3><p>Choose what your accepted friends can view.</p></div></div><label class="toggle-row"><div><strong>Share activity with friends</strong><p>Friends can view your runs and public stats.</p></div><input id="settings-share-activity" type="checkbox" /><span class="toggle-ui"></span></label><button class="btn btn-primary" type="submit">Save privacy</button></form>
+            <article class="panel settings-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="database"></i></span><div><h3>Your data</h3><p>Export a portable record of every run you have logged.</p></div></div><div class="settings-actions"><button id="settings-export-btn" class="btn btn-soft" type="button"><i data-lucide="download"></i>Export runs CSV</button><label class="btn btn-ghost file-button"><i data-lucide="upload"></i>Import runs CSV<input id="import-csv-input" type="file" accept=".csv,text/csv" hidden /></label></div></article>
+            <article class="panel settings-panel danger-panel"><div class="settings-title"><span class="settings-title-icon"><i data-lucide="triangle-alert"></i></span><div><h3>Danger zone</h3><p>These actions are permanent. Please be deliberate.</p></div></div><div class="settings-actions"><button id="change-password-btn" class="btn btn-ghost" type="button">Change password</button><button id="delete-account-btn" class="btn btn-danger" type="button">Delete account</button></div></article>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <!-- Run detail modal -->
+  <div id="run-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+    <div class="modal-backdrop" data-close-modal="run-modal"></div>
+    <article class="modal-card run-modal-card"><button class="icon-btn modal-close" type="button" data-close-modal="run-modal" aria-label="Close"><i data-lucide="x"></i></button><div id="run-modal-content"></div></article>
+  </div>
+
+  <!-- Confirmation modal -->
+  <div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+    <div class="modal-backdrop" data-close-modal="confirm-modal"></div>
+    <article class="modal-card confirm-modal-card"><button class="icon-btn modal-close" type="button" data-close-modal="confirm-modal" aria-label="Close"><i data-lucide="x"></i></button><span id="confirm-icon" class="confirm-icon"><i data-lucide="circle-alert"></i></span><h3 id="confirm-modal-title">Are you sure?</h3><p id="confirm-message"></p><div class="modal-actions"><button id="confirm-cancel" class="btn btn-ghost" type="button">Cancel</button><button id="confirm-action" class="btn btn-danger" type="button">Confirm</button></div></article>
+  </div>
+
+  <!-- Profile image / edit modal -->
+  <div id="profile-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title">
+    <div class="modal-backdrop" data-close-modal="profile-modal"></div>
+    <article class="modal-card profile-modal-card"><button class="icon-btn modal-close" type="button" data-close-modal="profile-modal" aria-label="Close"><i data-lucide="x"></i></button><h3 id="profile-modal-title">Edit profile</h3><form id="profile-form" class="profile-edit-form"><div class="avatar-upload-wrap"><span id="profile-edit-avatar" class="avatar avatar-xl">R</span><label class="btn btn-soft file-button"><i data-lucide="image-up"></i>Upload photo<input id="profile-image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label></div><label class="form-field">Display name<input id="profile-display-name" type="text" maxlength="40" required /></label><label class="form-field">Email<input id="profile-email" type="email" required /></label><div class="modal-actions"><button class="btn btn-ghost" type="button" data-close-modal="profile-modal">Cancel</button><button class="btn btn-primary" type="submit">Save changes</button></div></form></article>
+  </div>
+
+  <!-- Password modal -->
+  <div id="password-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
+    <div class="modal-backdrop" data-close-modal="password-modal"></div>
+    <article class="modal-card compact-modal"><button class="icon-btn modal-close" type="button" data-close-modal="password-modal" aria-label="Close"><i data-lucide="x"></i></button><h3 id="password-modal-title">Change password</h3><form id="password-form" class="profile-edit-form"><label class="form-field">New password<input id="new-password" type="password" minlength="8" required /></label><div class="modal-actions"><button class="btn btn-ghost" type="button" data-close-modal="password-modal">Cancel</button><button class="btn btn-primary" type="submit">Update password</button></div></form></article>
+  </div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
