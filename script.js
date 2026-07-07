@@ -10,9 +10,9 @@
 
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-const CONFIG = { 
-  supabaseUrl: 'https://rxhjinknzuylsmxpjtkl.supabase.co', 
-  supabasePublishableKey: 'sb_publishable_18xCFx2a9J0pP4n0LOu5lw_W56aXL35', 
+const CONFIG = 
+{ supabaseUrl: 'https://rxhjinknzuylsmxpjtkl.supabase.co',
+  supabasePublishableKey: 'sb_publishable_18xCFx2a9J0pP4n0LOu5lw_W56aXL35',
 };
 
 const isConfigured = !CONFIG.supabaseUrl.includes('PASTE_') && !CONFIG.supabasePublishableKey.includes('PASTE_');
@@ -99,7 +99,18 @@ function dateToISO(date) {
   const offset = date.getTimezoneOffset();
   return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10);
 }
-function localDate(iso) { return new Date(`${iso}T12:00:00`); }
+function localDate(value) {
+  // Run dates are stored as YYYY-MM-DD; profile timestamps are full ISO values.
+  // Appending a time to an ISO timestamp produces an invalid date, so only do it
+  // for date-only values (at noon to avoid timezone day shifts).
+  if (value instanceof Date) return new Date(value.getTime());
+  if (typeof value === 'number') return new Date(value);
+  const text = String(value || '').trim();
+  if (!text) return new Date(NaN);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T12:00:00`) : new Date(text);
+}
+function isValidDate(value) { return !Number.isNaN(localDate(value).getTime()); }
+function firstValidDate(...values) { return values.find(isValidDate) || new Date(); }
 function isSameDay(a, b) { return dateToISO(a) === dateToISO(b); }
 function round(value, digits = 2) { return Number(Number(value || 0).toFixed(digits)); }
 function sum(items, getter) { return items.reduce((total, item) => total + Number(getter(item) || 0), 0); }
@@ -121,8 +132,15 @@ function kmToDisplay(km, unit = getDistanceUnit()) { return unit === 'km' ? Numb
 function displayToKm(distance, unit = getDistanceUnit()) { return unit === 'km' ? Number(distance || 0) : milesToKm(distance); }
 function metersToDisplay(meters, unit = getDistanceUnit()) { return unit === 'km' ? Number(meters || 0) : Number(meters || 0) / METERS_PER_FOOT; }
 function displayToMeters(value, unit = getDistanceUnit()) { return unit === 'km' ? Number(value || 0) : Number(value || 0) * METERS_PER_FOOT; }
-function formatUnitInput(km, digits = 2) { return Number(kmToDisplay(km).toFixed(digits)); }
-function formatElevationInput(meters, digits = 0) { return Number(metersToDisplay(meters).toFixed(digits)); }
+function cleanInputNumber(value, maxDigits = 2) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return '';
+  // Inputs should look clean (30, 18.64), while the canonical value is kept in
+  // the dataset below so toggling/saving an untouched value never loses precision.
+  return String(Number(numeric.toFixed(maxDigits)));
+}
+function formatUnitInput(km, digits = 2) { return cleanInputNumber(kmToDisplay(km), digits); }
+function formatElevationInput(meters, digits = 0) { return cleanInputNumber(metersToDisplay(meters), digits); }
 function formatDistance(km, digits = 2, unit = getDistanceUnit()) { return `${kmToDisplay(km, unit).toFixed(digits)} ${unitLabel(unit)}`; }
 function formatDistanceValue(km, digits = 2, unit = getDistanceUnit()) { return kmToDisplay(km, unit).toFixed(digits); }
 function formatElevation(meters, digits = 0, unit = getDistanceUnit()) { return `${metersToDisplay(meters, unit).toLocaleString(undefined, { maximumFractionDigits: digits })} ${elevationUnitLabel(unit)}`; }
@@ -134,9 +152,9 @@ function elevationInputToCanonical(input) {
   if (input?.dataset?.canonicalM && input.value === input.dataset.renderedValue) return Number(input.dataset.canonicalM);
   return round(Math.max(0, displayToMeters(Number(input?.value || 0))), 3);
 }
-function setDistanceInputFromCanonical(input, distanceKm, digits = 6) {
+function setDistanceInputFromCanonical(input, distanceKm, digits = 2) {
   if (!input) return;
-  const value = String(formatUnitInput(distanceKm, digits));
+  const value = formatUnitInput(distanceKm, digits);
   input.value = value; input.dataset.canonicalKm = String(distanceKm); input.dataset.renderedValue = value;
 }
 function setElevationInputFromCanonical(input, elevationM, digits = 3) {
@@ -183,8 +201,9 @@ function getCanonicalPacePerKm(run) {
   const km = Number(run?.distance_km || 0);
   return km > 0 ? Number(run.duration_seconds) / km : Infinity;
 }
-function formatDate(iso, options = { month: 'short', day: 'numeric', year: 'numeric' }) {
-  return localDate(iso).toLocaleDateString(undefined, options);
+function formatDate(value, options = { month: 'short', day: 'numeric', year: 'numeric' }) {
+  const date = localDate(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString(undefined, options);
 }
 function formatMonth(date) { return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }); }
 function startOfDay(date) { const d = new Date(date); d.setHours(0, 0, 0, 0); return d; }
@@ -694,7 +713,7 @@ function renderFriendProfile() {
   host.innerHTML = `
     <div class="friend-profile-hero">
       ${avatarMarkup(friend, 'avatar-xl')}
-      <div class="profile-identity"><p class="eyebrow">RUNNING TOGETHER</p><h2>${escapeHTML(friend.display_name || 'Runner')}</h2><p>${privateActivity ? 'Their activity is private.' : `Joined ${formatDate(friend.joined_at || todayISO(), { month: 'long', year: 'numeric' })}`}</p><div class="profile-facts"><span><b>${friendStats.totalRuns}</b> runs</span><span><b>${formatDistance(friendStats.totalDistance, 1)}</b> lifetime</span><span><b>${friendStats.streak}</b> day streak</span></div></div>
+      <div class="profile-identity"><p class="eyebrow">RUNNING TOGETHER</p><h2>${escapeHTML(friend.display_name || 'Runner')}</h2><p>${privateActivity ? 'Their activity is private.' : `Joined ${formatDate(firstValidDate(friend.joined_at, friend.created_at), { month: 'long', year: 'numeric' })}`}</p><div class="profile-facts"><span><b>${friendStats.totalRuns}</b> runs</span><span><b>${formatDistance(friendStats.totalDistance, 1)}</b> lifetime</span><span><b>${friendStats.streak}</b> day streak</span></div></div>
       <div class="profile-hero-actions"><button id="compare-btn" class="btn btn-primary" type="button"><i data-lucide="columns-2"></i>Compare</button><button id="remove-friend-btn" class="btn btn-ghost" type="button">Remove</button></div>
     </div>
     <div class="friend-stat-grid">
@@ -748,7 +767,7 @@ function renderProfile() {
   const profile = state.profile;
   const host = $('#profile-content');
   if (!profile) return;
-  host.innerHTML = `<div class="profile-hero">${avatarMarkup(profile, 'avatar-xl')}<div class="profile-identity"><p class="eyebrow">YOUR RUNNING PROFILE</p><h2>${escapeHTML(profile.display_name || 'Runner')}</h2><p>${escapeHTML(profile.email || state.user?.email || '')}</p><div class="profile-facts"><span>Member since <b>${formatDate(profile.joined_at || todayISO(), { month: 'short', year: 'numeric' })}</b></span><span><b>${state.friends.length}</b> friends</span></div></div><div class="profile-hero-actions"><button id="edit-profile-btn" class="btn btn-soft" type="button"><i data-lucide="pencil"></i>Edit profile</button></div></div><div class="profile-dashboard-grid"><article class="panel"><div class="panel-heading"><div><p class="eyebrow">YOUR OVERVIEW</p><h3>Lifetime effort</h3></div></div><div class="profile-info-list"><div><span>Total distance</span><strong>${formatDistance(stats.totalDistance)}</strong></div><div><span>Runs logged</span><strong>${stats.totalRuns}</strong></div><div><span>Time on feet</span><strong>${formatDurationShort(stats.totalTime)}</strong></div><div><span>Current streak</span><strong>${stats.streak} days</strong></div></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">BEST WORK</p><h3>Personal records</h3></div></div><div class="mini-pr-grid">${getPRs().slice(0,4).map(pr => `<button class="mini-pr" ${pr.run ? `data-run-id="${pr.run.id}"` : ''}><span>${escapeHTML(pr.label)}</span><strong>${formatPRValue(pr)}</strong><small>${pr.run ? formatDate(pr.run.date, { month: 'short', day: 'numeric' }) : 'Keep building'}</small></button>`).join('')}</div></article></div>`;
+  host.innerHTML = `<div class="profile-hero">${avatarMarkup(profile, 'avatar-xl')}<div class="profile-identity"><p class="eyebrow">YOUR RUNNING PROFILE</p><h2>${escapeHTML(profile.display_name || 'Runner')}</h2><p>${escapeHTML(profile.email || state.user?.email || '')}</p><div class="profile-facts"><span>Member since <b>${formatDate(firstValidDate(profile.joined_at, profile.created_at, state.user?.created_at), { month: 'short', year: 'numeric' })}</b></span><span><b>${state.friends.length}</b> friends</span></div></div><div class="profile-hero-actions"><button id="edit-profile-btn" class="btn btn-soft" type="button"><i data-lucide="pencil"></i>Edit profile</button></div></div><div class="profile-dashboard-grid"><article class="panel"><div class="panel-heading"><div><p class="eyebrow">YOUR OVERVIEW</p><h3>Lifetime effort</h3></div></div><div class="profile-info-list"><div><span>Total distance</span><strong>${formatDistance(stats.totalDistance)}</strong></div><div><span>Runs logged</span><strong>${stats.totalRuns}</strong></div><div><span>Time on feet</span><strong>${formatDurationShort(stats.totalTime)}</strong></div><div><span>Current streak</span><strong>${stats.streak} days</strong></div></div></article><article class="panel"><div class="panel-heading"><div><p class="eyebrow">BEST WORK</p><h3>Personal records</h3></div></div><div class="mini-pr-grid">${getPRs().slice(0,4).map(pr => `<button class="mini-pr" ${pr.run ? `data-run-id="${pr.run.id}"` : ''}><span>${escapeHTML(pr.label)}</span><strong>${formatPRValue(pr)}</strong><small>${pr.run ? formatDate(pr.run.date, { month: 'short', day: 'numeric' }) : 'Keep building'}</small></button>`).join('')}</div></article></div>`;
 }
 
 function refreshUnitLabels() {
@@ -767,8 +786,8 @@ function refreshUnitLabels() {
 function renderSettings() {
   if (!state.profile) return;
   refreshUnitLabels();
-  setDistanceInputFromCanonical($('#settings-weekly-goal'), Number(state.profile.weekly_goal_km || 30), 6);
-  setDistanceInputFromCanonical($('#settings-monthly-goal'), Number(state.profile.monthly_goal_km || 120), 6);
+  setDistanceInputFromCanonical($('#settings-weekly-goal'), Number(state.profile.weekly_goal_km || 30), 2);
+  setDistanceInputFromCanonical($('#settings-monthly-goal'), Number(state.profile.monthly_goal_km || 120), 2);
   $('#settings-share-activity').checked = state.profile.settings?.share_activity !== false;
 }
 
@@ -978,7 +997,7 @@ function resetRunForm() {
 }
 function editRun(run) {
   state.editingRunId = run.id;
-  setDistanceInputFromCanonical($('#run-distance'), run.distance_km, 6);
+  setDistanceInputFromCanonical($('#run-distance'), run.distance_km, 3);
   const h = Math.floor(run.duration_seconds / 3600); const m = Math.floor((run.duration_seconds % 3600) / 60); const s = run.duration_seconds % 60;
   $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s; $('#run-date').value = run.date; $('#run-type').value = run.run_type || 'Easy'; $('#run-route').value = run.route_name || ''; $('#run-notes').value = run.notes || ''; if (run.elevation_m) setElevationInputFromCanonical($('#run-elevation'), run.elevation_m); else { $('#run-elevation').value = ''; delete $('#run-elevation').dataset.canonicalM; delete $('#run-elevation').dataset.renderedValue; } $('#run-calories').value = run.calories || ''; $('#run-visibility').value = run.visibility || 'friends';
   $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="save"></i>Update run'; navigateTo('log-run'); updateRunPreview(); initIcons();
@@ -1096,33 +1115,39 @@ async function saveGoals(event) {
   try { const { data, error } = await supabase.from('profiles').update({ weekly_goal_km, monthly_goal_km }).eq('id', state.user.id).select().single(); if (error) throw error; state.profile = { ...data, settings: data.settings || {} }; renderAll(); showToast('Goals saved', 'Your dashboard ring now reflects the new target.'); }
   catch (error) { showToast('Could not save goals', error.message, 'error'); }
 }
-function captureUnitSensitiveDraft(unit) {
-  const fieldNumber = selector => Number($(selector)?.value || 0);
-  const runDistance = fieldNumber('#run-distance'); const runElevation = fieldNumber('#run-elevation'); const liveDistance = fieldNumber('#live-run-distance');
+function canonicalDistanceFromInput(input, fallback = 0) {
+  if (!input || String(input.value || '').trim() === '') return fallback;
+  const value = distanceInputToCanonical(input);
+  return value > 0 ? value : fallback;
+}
+function canonicalElevationFromInput(input, fallback = 0) {
+  if (!input || String(input.value || '').trim() === '') return fallback;
+  const value = elevationInputToCanonical(input);
+  return value > 0 ? value : fallback;
+}
+function captureUnitSensitiveDraft() {
+  const runDistanceInput = $('#run-distance');
+  const runElevationInput = $('#run-elevation');
+  const liveDistanceInput = $('#live-run-distance');
   return {
-    runDistanceKm: runDistance > 0 ? displayToKm(runDistance, unit) : 0,
-    runElevationM: runElevation > 0 ? displayToMeters(runElevation, unit) : 0,
-    runDistanceCanonicalKm: Number($('#run-distance')?.dataset.canonicalKm || 0),
-    runElevationCanonicalM: Number($('#run-elevation')?.dataset.canonicalM || 0),
-    liveDistanceKm: liveDistance > 0 ? displayToKm(liveDistance, unit) : state.liveRun.distanceKm || 0,
+    runDistanceKm: canonicalDistanceFromInput(runDistanceInput),
+    runElevationM: canonicalElevationFromInput(runElevationInput),
+    liveDistanceKm: canonicalDistanceFromInput(liveDistanceInput, state.liveRun.distanceKm || 0),
   };
 }
 function restoreUnitSensitiveDraft(draft) {
-  if (draft.runDistanceKm > 0) {
-    if (draft.runDistanceCanonicalKm > 0) setDistanceInputFromCanonical($('#run-distance'), draft.runDistanceCanonicalKm, 6);
-    else $('#run-distance').value = formatUnitInput(draft.runDistanceKm, 6);
-  }
-  if (draft.runElevationM > 0) {
-    if (draft.runElevationCanonicalM > 0) setElevationInputFromCanonical($('#run-elevation'), draft.runElevationCanonicalM);
-    else $('#run-elevation').value = formatElevationInput(draft.runElevationM, 3);
-  }
+  if (draft.runDistanceKm > 0) setDistanceInputFromCanonical($('#run-distance'), draft.runDistanceKm, 3);
+  if (draft.runElevationM > 0) setElevationInputFromCanonical($('#run-elevation'), draft.runElevationM);
   state.liveRun.distanceKm = draft.liveDistanceKm;
-  if ($('#live-run-distance')) $('#live-run-distance').value = draft.liveDistanceKm > 0 ? formatUnitInput(draft.liveDistanceKm, 4) : '';
+  if ($('#live-run-distance')) {
+    if (draft.liveDistanceKm > 0) setDistanceInputFromCanonical($('#live-run-distance'), draft.liveDistanceKm, 3);
+    else { $('#live-run-distance').value = ''; delete $('#live-run-distance').dataset.canonicalKm; delete $('#live-run-distance').dataset.renderedValue; }
+  }
   updateRunPreview(); renderLiveRun();
 }
 async function setDistanceUnit(unit) {
   if (!['mi', 'km'].includes(unit) || unit === getDistanceUnit()) return;
-  const previousUnit = getDistanceUnit(); const draft = captureUnitSensitiveDraft(previousUnit);
+  const draft = captureUnitSensitiveDraft();
   const settings = { ...(state.profile.settings || {}), distance_unit: unit };
   try {
     const { data, error } = await supabase.from('profiles').update({ settings }).eq('id', state.user.id).select().single();
@@ -1284,7 +1309,10 @@ function renderLiveRun() {
   const distance = kmToDisplay(distanceKm);
   const liveDistanceInput = $('#live-run-distance');
   if (!liveDistanceInput) return;
-  if (document.activeElement !== liveDistanceInput) liveDistanceInput.value = distanceKm > 0 ? Number(distance.toFixed(4)) : '';
+  if (document.activeElement !== liveDistanceInput) {
+    if (distanceKm > 0) setDistanceInputFromCanonical(liveDistanceInput, distanceKm, 3);
+    else { liveDistanceInput.value = ''; delete liveDistanceInput.dataset.canonicalKm; delete liveDistanceInput.dataset.renderedValue; }
+  }
   $('#live-run-type').value = state.liveRun.type || 'Easy';
   if (document.activeElement !== $('#live-run-route')) $('#live-run-route').value = state.liveRun.routeName || '';
   $('#live-run-elapsed').textContent = formatDuration(elapsedSeconds);
@@ -1308,9 +1336,18 @@ function toggleLiveRun() {
   }
   persistLiveRunState(); renderLiveRun();
 }
+function clearCanonicalInputMarker(input, type = 'distance') {
+  if (!input) return;
+  if (type === 'elevation') delete input.dataset.canonicalM;
+  else delete input.dataset.canonicalKm;
+  delete input.dataset.renderedValue;
+}
 function updateLiveRunDistance() {
-  const distance = Number($('#live-run-distance').value || 0);
-  state.liveRun.distanceKm = distance > 0 ? round(displayToKm(distance), 6) : 0;
+  const liveInput = $('#live-run-distance');
+  // An input event means the person intentionally edited the displayed value.
+  // Clear the exact-display marker first so their typed value is converted exactly.
+  clearCanonicalInputMarker(liveInput);
+  state.liveRun.distanceKm = canonicalDistanceFromInput(liveInput, 0);
   persistLiveRunState(); renderLiveRun();
 }
 function updateLiveRunMeta() {
@@ -1332,7 +1369,8 @@ function finishLiveRun() {
   if (elapsedSeconds < 1) return showToast('Start the timer first', 'The live run needs at least one second before review.', 'error');
   const h = Math.floor(elapsedSeconds / 3600); const m = Math.floor((elapsedSeconds % 3600) / 60); const s = elapsedSeconds % 60;
   $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s;
-  $('#run-distance').value = state.liveRun.distanceKm > 0 ? formatUnitInput(state.liveRun.distanceKm, 4) : '';
+  if (state.liveRun.distanceKm > 0) setDistanceInputFromCanonical($('#run-distance'), state.liveRun.distanceKm, 3);
+  else { $('#run-distance').value = ''; delete $('#run-distance').dataset.canonicalKm; delete $('#run-distance').dataset.renderedValue; }
   $('#run-date').value = todayISO(); $('#run-type').value = state.liveRun.type || 'Easy'; $('#run-route').value = state.liveRun.routeName || '';
   state.editingRunId = null; $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="check"></i>Save run';
   updateRunPreview(); navigateTo('log-run'); initIcons();
@@ -1350,6 +1388,13 @@ function bindEvents() {
     setAuthMessage('');
   });
   $('#run-form').addEventListener('submit', handleRunSubmit);
+  // Preserve exact canonical values only until a field is actually edited.
+  // This lets clean rounded inputs switch units without drift, while a person’s
+  // newly typed number always becomes the new exact saved value.
+  ['#run-distance', '#settings-weekly-goal', '#settings-monthly-goal'].forEach(selector => {
+    $(selector).addEventListener('input', () => clearCanonicalInputMarker($(selector)));
+  });
+  $('#run-elevation').addEventListener('input', () => clearCanonicalInputMarker($('#run-elevation'), 'elevation'));
   ['#run-distance','#run-hours','#run-minutes','#run-seconds','#run-type'].forEach(selector => $(selector).addEventListener('input', updateRunPreview));
   $('#live-run-start-pause').addEventListener('click', toggleLiveRun); $('#live-run-reset').addEventListener('click', resetLiveRun); $('#live-run-finish').addEventListener('click', finishLiveRun);
   $('#live-run-distance').addEventListener('input', updateLiveRunDistance); $('#live-run-type').addEventListener('change', updateLiveRunMeta); $('#live-run-route').addEventListener('input', updateLiveRunMeta);
