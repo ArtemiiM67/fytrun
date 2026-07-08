@@ -731,10 +731,6 @@ function formatCanonicalPace(secondsPerKm) {
   const display = secondsPerKmToDisplay(secondsPerKm);
   return display ? formatPace(display) : '—';
 }
-function formatCanonicalPace(secondsPerKm) {
-  const display = secondsPerKmToDisplay(secondsPerKm);
-  return display ? formatPace(display) : '--';
-}
 function normalizeInterval(interval) {
   if (!interval || typeof interval !== 'object') return null;
   const repetitions = Math.max(1, Math.round(Number(interval.repetitions || 0)));
@@ -1764,67 +1760,6 @@ function parseCSV(text) {
 
 const LIVE_RUN_STORAGE_KEY = 'fytrun-live-run-v1';
 let liveRunTick = null;
-function liveRunElapsedMs() {
-  return Math.max(0, Number(state.liveRun.elapsedMs || 0) + (state.liveRun.running && state.liveRun.startedAtMs ? Date.now() - state.liveRun.startedAtMs : 0));
-}
-function persistLiveRunState() {
-  const payload = { ...state.liveRun, savedAt: Date.now() };
-  try { localStorage.setItem(LIVE_RUN_STORAGE_KEY, JSON.stringify(payload)); } catch (_) { /* non-critical browser storage failure */ }
-}
-function restoreLiveRunState() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(LIVE_RUN_STORAGE_KEY) || 'null');
-    if (!saved || typeof saved !== 'object') return;
-    state.liveRun = {
-      running: Boolean(saved.running),
-      startedAtMs: Number(saved.startedAtMs) || null,
-      elapsedMs: Math.max(0, Number(saved.elapsedMs) || 0),
-      distanceKm: Math.max(0, Number(saved.distanceKm) || 0),
-      type: TYPE_STYLES[saved.type] ? saved.type : 'Easy',
-      routeName: String(saved.routeName || '').slice(0, 80),
-    };
-    if (state.liveRun.running && !state.liveRun.startedAtMs) state.liveRun.running = false;
-  } catch (_) { /* start fresh if browser storage is malformed */ }
-}
-function liveRunStatus() {
-  if (state.liveRun.running) return { label: 'RUNNING NOW', copy: 'Your elapsed time is advancing from the real clock.', state: 'Running', button: 'Pause run', icon: 'pause' };
-  if (liveRunElapsedMs() > 0) return { label: 'PAUSED', copy: 'Your time is held. Resume when you are ready.', state: 'Paused', button: 'Resume run', icon: 'play' };
-  return { label: 'READY WHEN YOU ARE', copy: 'Press start when you move. Add distance whenever you know it.', state: 'Ready', button: 'Start run', icon: 'play' };
-}
-function renderLiveRun() {
-  const elapsedSeconds = Math.floor(liveRunElapsedMs() / 1000);
-  const status = liveRunStatus();
-  const distanceKm = Math.max(0, Number(state.liveRun.distanceKm || 0));
-  const distance = kmToDisplay(distanceKm);
-  const liveDistanceInput = $('#live-run-distance');
-  if (!liveDistanceInput) return;
-  if (document.activeElement !== liveDistanceInput) {
-    if (distanceKm > 0) setDistanceInputFromCanonical(liveDistanceInput, distanceKm, 3);
-    else { liveDistanceInput.value = ''; delete liveDistanceInput.dataset.canonicalKm; delete liveDistanceInput.dataset.renderedValue; }
-  }
-  $('#live-run-type').value = state.liveRun.type || 'Easy';
-  if (document.activeElement !== $('#live-run-route')) $('#live-run-route').value = state.liveRun.routeName || '';
-  $('#live-run-elapsed').textContent = formatDuration(elapsedSeconds);
-  $('#live-run-status').textContent = status.label;
-  $('#live-run-copy').textContent = status.copy;
-  $('#live-run-state-label').textContent = status.state;
-  $('#live-run-pace').textContent = distance > 0 && elapsedSeconds > 0 ? formatPace(elapsedSeconds / distance) : '—';
-  const dot = $('#live-run-status-dot'); dot.classList.toggle('running', state.liveRun.running); dot.classList.toggle('paused', !state.liveRun.running && elapsedSeconds > 0);
-  const startButton = $('#live-run-start-pause');
-  startButton.innerHTML = `<i data-lucide="${status.icon}"></i><span>${status.button}</span>`;
-  $('#live-run-finish').disabled = elapsedSeconds < 1;
-  if (state.liveRun.running && !liveRunTick) liveRunTick = window.setInterval(renderLiveRun, 250);
-  if (!state.liveRun.running && liveRunTick) { window.clearInterval(liveRunTick); liveRunTick = null; }
-  initIcons();
-}
-function toggleLiveRun() {
-  if (state.liveRun.running) {
-    state.liveRun.elapsedMs = liveRunElapsedMs(); state.liveRun.startedAtMs = null; state.liveRun.running = false;
-  } else {
-    state.liveRun.startedAtMs = Date.now(); state.liveRun.running = true;
-  }
-  persistLiveRunState(); renderLiveRun();
-}
 function clearCanonicalInputMarker(input, type = 'distance') {
   if (!input) return;
   if (type === 'elevation') delete input.dataset.canonicalM;
@@ -1843,29 +1778,6 @@ function updateLiveRunMeta() {
   state.liveRun.type = $('#live-run-type').value || 'Easy'; state.liveRun.routeName = $('#live-run-route').value.trim().slice(0, 80);
   persistLiveRunState(); renderLiveRun();
 }
-function resetLiveRun() {
-  const hasProgress = liveRunElapsedMs() > 0 || state.liveRun.distanceKm > 0;
-  const performReset = () => {
-    state.liveRun = { running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '' };
-    try { localStorage.removeItem(LIVE_RUN_STORAGE_KEY); } catch (_) { /* non-critical */ }
-    renderLiveRun(); showToast('Live run reset', 'The stopwatch and live details are ready for a fresh start.');
-  };
-  if (hasProgress) showConfirm({ title: 'Reset this live run?', message: 'Its elapsed time and unsaved details will be cleared.', confirmText: 'Reset run', action: performReset }); else performReset();
-}
-function finishLiveRun() {
-  if (state.liveRun.running) toggleLiveRun();
-  const elapsedSeconds = Math.floor(liveRunElapsedMs() / 1000);
-  if (elapsedSeconds < 1) return showToast('Start the timer first', 'The live run needs at least one second before review.', 'error');
-  const h = Math.floor(elapsedSeconds / 3600); const m = Math.floor((elapsedSeconds % 3600) / 60); const s = elapsedSeconds % 60;
-  $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s;
-  if (state.liveRun.distanceKm > 0) setDistanceInputFromCanonical($('#run-distance'), state.liveRun.distanceKm, 3);
-  else { $('#run-distance').value = ''; delete $('#run-distance').dataset.canonicalKm; delete $('#run-distance').dataset.renderedValue; }
-  $('#run-date').value = todayISO(); $('#run-type').value = state.liveRun.type || 'Easy'; $('#run-route').value = state.liveRun.routeName || '';
-  state.editingRunId = null; $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="check"></i>Save run';
-  updateRunPreview(); navigateTo('log-run'); initIcons();
-  showToast('Live time added', 'Review distance and optional details, then save the run.');
-}
-
 let liveAudioContext = null;
 function defaultLiveRun(overrides = {}) {
   return { mode: 'free', running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '', laps: [], guided: null, ...overrides };
@@ -1986,7 +1898,7 @@ function renderLiveRun() {
   $('#live-run-status').textContent = status.label;
   $('#live-run-copy').textContent = status.copy;
   $('#live-run-state-label').textContent = status.state;
-  $('#live-run-pace').textContent = distance > 0 && elapsedSeconds > 0 ? formatPace(elapsedSeconds / distance) : 'â€”';
+  $('#live-run-pace').textContent = distance > 0 && elapsedSeconds > 0 ? formatPace(elapsedSeconds / distance) : '—';
   if (!distance || elapsedSeconds <= 0) $('#live-run-pace').textContent = '--';
   $('#live-run-stage-title').textContent = guidedMode ? 'Guided interval workout' : 'Live run stopwatch';
   $('#guided-stage-label').classList.toggle('hidden', !guidedMode);
