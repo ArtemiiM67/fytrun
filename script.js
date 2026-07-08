@@ -43,7 +43,7 @@ const state = {
   confirmAction: null,
   profilePhotoFile: null,
   isLoading: false,
-  liveRun: { mode: 'free', running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '', laps: [], guided: null },
+  liveRun: { mode: 'free', workoutId: null, running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '', laps: [], guided: null },
   leaderboardRuns: null,
   leaderboardError: null,
 };
@@ -1062,6 +1062,7 @@ function startWorkoutFromPlan(workout) {
   const loadWorkout = () => {
     state.liveRun = defaultLiveRun({
       mode: workout.interval ? 'guided' : 'free',
+      workoutId: workout.id,
       distanceKm: workout.targetDistanceKm || 0,
       type: workout.runType || 'Easy',
       routeName: workout.title || '',
@@ -1780,7 +1781,7 @@ function updateLiveRunMeta() {
 }
 let liveAudioContext = null;
 function defaultLiveRun(overrides = {}) {
-  return { mode: 'free', running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '', laps: [], guided: null, ...overrides };
+  return { mode: 'free', workoutId: null, running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '', laps: [], guided: null, ...overrides };
 }
 function liveRunElapsedMs() {
   return Math.max(0, Number(state.liveRun.elapsedMs || 0) + (state.liveRun.running && state.liveRun.startedAtMs ? Date.now() - state.liveRun.startedAtMs : 0));
@@ -1844,6 +1845,7 @@ function restoreLiveRunState() {
     if (!saved || typeof saved !== 'object') return;
     state.liveRun = defaultLiveRun({
       mode: saved.mode === 'guided' ? 'guided' : 'free',
+      workoutId: saved.workoutId || saved.guided?.workoutId || null,
       running: Boolean(saved.running),
       startedAtMs: Number(saved.startedAtMs) || null,
       elapsedMs: Math.max(0, Number(saved.elapsedMs) || 0),
@@ -1947,32 +1949,80 @@ function setLiveRunMode(mode) {
   if (liveRunElapsedMs() > 0 || state.liveRun.laps?.length) showConfirm({ title: 'Switch live mode?', message: 'This clears the current unsaved live timer session.', confirmText: 'Switch mode', action: switchMode });
   else switchMode();
 }
+
+function clearLiveRunSession(mode = 'free') {
+  if (liveRunTick) { window.clearInterval(liveRunTick); liveRunTick = null; }
+  $('#live-run-distance')?.blur();
+  $('#live-run-route')?.blur();
+  state.liveRun = defaultLiveRun({ mode });
+  try { localStorage.removeItem(LIVE_RUN_STORAGE_KEY); } catch (_) { /* non-critical */ }
+  renderLiveRun();
+}
+async function completeWorkoutAfterReview(workoutId) {
+  if (!workoutId || !state.user || !state.profile) return false;
+  const plan = getTrainingPlan();
+  const workout = plan.find(item => item.id === workoutId);
+  if (!workout || workout.status === 'completed') return false;
+  const nextPlan = plan.map(item => item.id === workoutId ? { ...item, status: 'completed' } : item).map(normalizeWorkout);
+  const settings = { ...(state.profile.settings || {}), training_plan: nextPlan };
+  const { data, error } = await supabase.from('profiles').update({ settings }).eq('id', state.user.id).select().single();
+  if (error) throw error;
+  state.profile = { ...data, settings: data.settings || {} };
+  renderTraining();
+  return true;
+}
 function resetLiveRun() {
-  const hasProgress = liveRunElapsedMs() > 0 || state.liveRun.distanceKm > 0 || state.liveRun.laps?.length;
+  const hasProgress = liveRunElapsedMs() > 0 || state.liveRun.distanceKm > 0 || state.liveRun.laps?.length || state.liveRun.workoutId;
   const performReset = () => {
     const mode = state.liveRun.mode || 'free';
-    state.liveRun = defaultLiveRun({ mode });
-    try { localStorage.removeItem(LIVE_RUN_STORAGE_KEY); } catch (_) { /* non-critical */ }
-    renderLiveRun(); showToast('Live run reset', 'The stopwatch and live details are ready for a fresh start.');
+    clearLiveRunSession(mode);
+    showToast('Live run reset', 'The stopwatch and live details are ready for a fresh start.');
   };
   if (hasProgress) showConfirm({ title: 'Reset this live run?', message: 'Its elapsed time and unsaved details will be cleared.', confirmText: 'Reset run', action: performReset }); else performReset();
 }
-function finishLiveRun() {
+
+async function finishLiveRun() {
   if (state.liveRun.running) toggleLiveRun();
   const elapsedSeconds = Math.floor(liveRunElapsedMs() / 1000);
   if (elapsedSeconds < 1) return showToast('Start the timer first', 'The live run needs at least one second before review.', 'error');
-  const workout = state.liveRun.guided?.workoutId ? workoutById(state.liveRun.guided.workoutId) : null;
-  const h = Math.floor(elapsedSeconds / 3600); const m = Math.floor((elapsedSeconds % 3600) / 60); const s = elapsedSeconds % 60;
-  $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s;
+
+  const workoutId = state.liveRun.workoutId || state.liveRun.guided?.workoutId || null;
+  const workout = workoutId ? workoutById(workoutId) : null;
+  const wasGuided = state.liveRun.mode === 'guided';
+  const hadLaps = Boolean(state.liveRun.laps?.length);
+  const h = Math.floor(elapsedSeconds / 3600);
+  const m = Math.floor((elapsedSeconds % 3600) / 60);
+  const s = elapsedSeconds % 60;
+
+  $('#run-hours').value = h;
+  $('#run-minutes').value = m;
+  $('#run-seconds').value = s;
   if (state.liveRun.distanceKm > 0) setDistanceInputFromCanonical($('#run-distance'), state.liveRun.distanceKm, 3);
   else { $('#run-distance').value = ''; delete $('#run-distance').dataset.canonicalKm; delete $('#run-distance').dataset.renderedValue; }
-  $('#run-date').value = todayISO(); $('#run-type').value = state.liveRun.type || 'Easy'; $('#run-route').value = state.liveRun.routeName || '';
-  if (state.liveRun.mode === 'guided') $('#run-notes').value = guidedWorkoutSummary(workout, elapsedSeconds);
-  else if (state.liveRun.laps?.length) $('#run-notes').value = freeRunLapSummary(elapsedSeconds);
-  state.editingRunId = null; $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="check"></i>Save run';
-  updateRunPreview(); navigateTo('log-run'); initIcons();
-  showToast('Live time added', 'Review distance and optional details, then save the run.');
+  $('#run-date').value = todayISO();
+  $('#run-type').value = state.liveRun.type || workout?.runType || 'Easy';
+  $('#run-route').value = state.liveRun.routeName || workout?.title || '';
+  if (wasGuided) $('#run-notes').value = guidedWorkoutSummary(workout, elapsedSeconds);
+  else if (hadLaps) $('#run-notes').value = freeRunLapSummary(elapsedSeconds);
+  else if (workout) $('#run-notes').value = plannedWorkoutSummary(workout, elapsedSeconds);
+
+  state.editingRunId = null;
+  $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="check"></i>Save run';
+  updateRunPreview();
+
+  let completedWorkout = false;
+  try {
+    completedWorkout = await completeWorkoutAfterReview(workoutId);
+  } catch (error) {
+    showToast('Workout not marked complete', error.message || 'Your run review is ready, but the calendar update failed.', 'error');
+  }
+
+  clearLiveRunSession('free');
+  navigateTo('log-run');
+  initIcons();
+  showToast('Live time added', completedWorkout ? 'The planned workout is complete on your calendar. Review and save the run.' : 'Review distance and optional details, then save the run.');
 }
+
 function addLiveLap() {
   const elapsedMs = liveRunElapsedMs();
   if (elapsedMs < 1000 || state.liveRun.mode !== 'free') return;
@@ -2018,6 +2068,7 @@ function selectGuidedWorkout(id, { silent = false } = {}) {
   }
   state.liveRun = defaultLiveRun({
     mode: 'guided',
+    workoutId: workout.id,
     distanceKm: workout.targetDistanceKm || 0,
     type: workout.runType || 'Intervals',
     routeName: workout.title || 'Guided workout',
@@ -2047,6 +2098,14 @@ function guidedWorkoutSummary(workout, elapsedSeconds) {
   if (workout?.targetDistanceKm) lines.push(`Target distance: ${formatDistance(workout.targetDistanceKm)}`);
   if (workout?.targetPaceSecondsPerKm) lines.push(`Target pace: ${formatCanonicalPace(workout.targetPaceSecondsPerKm)}`);
   if (stages.length) lines.push(`Structure: ${stages.map(stage => `${stage.label} ${formatTimeInput(stage.durationSeconds)}`).join('; ')}`);
+  if (workout?.notes) lines.push(`Plan notes: ${workout.notes}`);
+  return lines.join('\n');
+}
+
+function plannedWorkoutSummary(workout, elapsedSeconds) {
+  const lines = [`Planned workout completed: ${workout?.title || state.liveRun.routeName || 'Workout'}`, `Total duration: ${formatDuration(elapsedSeconds)}`];
+  if (workout?.targetDistanceKm) lines.push(`Target distance: ${formatDistance(workout.targetDistanceKm)}`);
+  if (workout?.targetPaceSecondsPerKm) lines.push(`Target pace: ${formatCanonicalPace(workout.targetPaceSecondsPerKm)}`);
   if (workout?.notes) lines.push(`Plan notes: ${workout.notes}`);
   return lines.join('\n');
 }
