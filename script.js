@@ -1419,7 +1419,24 @@ async function handleAuthSubmit(event, mode) {
       const displayName = $('#register-name').value.trim(); const email = $('#register-email').value.trim(); const password = $('#register-password').value;
       if (displayName.length < 2) throw new Error('Please enter a display name with at least 2 characters.');
       const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName, full_name: displayName } } });
-      if (error) throw error;
+      if (error) {
+        const alreadyExists = /already registered|already exists|user already/i.test(error.message || '');
+        throw new Error(alreadyExists ? 'An account with this email already exists. Sign in instead.' : error.message);
+      }
+
+      // Supabase may intentionally avoid returning a hard error for duplicate signups
+      // when email confirmation is enabled. In that case the returned user has no
+      // identities, so show a clear sign-in message instead of pretending a new
+      // account was created.
+      const existingEmail = data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0;
+      if (existingEmail) {
+        $('#register-form').reset();
+        showAuthMode('signin');
+        $('#sign-in-email').value = email;
+        setAuthMessage('An account with this email already exists. Sign in instead. Use password reset if you forgot the password.');
+        return;
+      }
+
       if (data.session?.user) {
         await supabase.from('profiles').upsert({ id: data.user.id, display_name: displayName, email, joined_at: new Date().toISOString() });
         await enterApp(data.user);
@@ -1522,24 +1539,65 @@ function confirmDeleteRun(run) {
   }});
 }
 
+function isMissingRpcError(error) {
+  return /Could not find the function|schema cache|PGRST202|search_paceforge_profiles|paceforge_profiles_by_ids/i.test(error?.message || '');
+}
+
+function sanitizeProfileSearchTerm(query) {
+  return String(query || '').trim().replace(/[,%()]/g, '').replace(/\s+/g, ' ').slice(0, 80);
+}
+
+async function searchProfilesForFriends(searchTerm) {
+  let rpcError = null;
+  try {
+    const { data, error } = await supabase.rpc('search_paceforge_profiles', { search_term: searchTerm });
+    if (!error) return data || [];
+    rpcError = error;
+    if (!isMissingRpcError(error)) throw error;
+  } catch (error) {
+    rpcError = error;
+    if (!isMissingRpcError(error)) throw error;
+  }
+
+  // Fallback for projects where the optional profile-search RPC was not created
+  // or Supabase's schema cache has not picked it up yet. The SQL setup includes
+  // an authenticated profile read policy, so this keeps friend search usable
+  // without requiring a backend redeploy.
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, display_name, email, avatar_url, joined_at, settings')
+    .neq('id', state.user.id)
+    .or(`display_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
+    .limit(12);
+
+  if (error) {
+    const message = rpcError?.message
+      ? `Friend search fallback failed after the Supabase RPC was unavailable: ${error.message}`
+      : error.message;
+    throw new Error(message);
+  }
+  return data || [];
+}
+
 async function searchFriends() {
   const query = $('#friend-search').value.trim();
   const host = $('#friend-search-results');
   if (query.length < 2) { host.innerHTML = '<p style="margin:8px 0 0;color:var(--subtle);font-size:10px;">Type at least 2 characters to search runners.</p>'; return; }
   host.innerHTML = '<div class="loading-line"></div>';
   try {
-    const safe = query.replace(/[,%()]/g, '');
-    const { data, error } = await supabase.rpc('search_paceforge_profiles', { search_term: safe });
-    if (error) throw error;
+    const safe = sanitizeProfileSearchTerm(query);
+    if (safe.length < 2) { host.innerHTML = '<p style="margin:8px 0 0;color:var(--subtle);font-size:10px;">Type at least 2 letters or numbers to search runners.</p>'; return; }
+    const data = await searchProfilesForFriends(safe);
     if (!data?.length) { host.innerHTML = '<p style="margin:8px 0 0;color:var(--subtle);font-size:10px;">No runners found. Try a different name or email.</p>'; return; }
-    host.innerHTML = data.map(profile => {
+    host.innerHTML = data.filter(profile => profile.id !== state.user.id).map(profile => {
       const rel = state.relationships.find(item => (item.sender_id === profile.id && item.receiver_id === state.user.id) || (item.receiver_id === profile.id && item.sender_id === state.user.id));
       let control = `<button class="btn btn-primary" type="button" data-send-request="${profile.id}">Add</button>`;
       if (rel?.status === 'accepted') control = '<span class="panel-note">Already friends</span>';
       if (rel?.status === 'pending' && rel.sender_id === state.user.id) control = '<span class="panel-note">Request sent</span>';
       if (rel?.status === 'pending' && rel.receiver_id === state.user.id) control = `<button class="btn btn-soft" type="button" data-request-action="accept" data-request-id="${rel.id}">Accept</button>`;
-      return `<div class="search-result">${avatarMarkup(profile)}<span class="friend-copy"><strong>${escapeHTML(profile.display_name || 'Runner')}</strong><span>Runner on FytRun</span></span>${control}</div>`;
-    }).join(''); initIcons();
+      return `<div class="search-result">${avatarMarkup(profile)}<span class="friend-copy"><strong>${escapeHTML(profile.display_name || 'Runner')}</strong><span>${escapeHTML(profile.email || 'Runner on FytRun')}</span></span>${control}</div>`;
+    }).join('') || '<p style="margin:8px 0 0;color:var(--subtle);font-size:10px;">No runners found. Try a different name or email.</p>';
+    initIcons();
   } catch (error) { host.innerHTML = `<p style="margin:8px 0 0;color:var(--danger);font-size:10px;">${escapeHTML(error.message)}</p>`; }
 }
 async function sendFriendRequest(receiverId) {
@@ -1559,8 +1617,20 @@ async function respondFriendRequest(requestId, status) {
   } catch (error) { showToast('Could not update request', error.message, 'error'); }
 }
 async function fetchProfilesByIds(ids) {
-  if (!ids.length) return [];
-  const { data, error } = await supabase.rpc('paceforge_profiles_by_ids', { profile_ids: ids });
+  const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+  if (!uniqueIds.length) return [];
+  try {
+    const { data, error } = await supabase.rpc('paceforge_profiles_by_ids', { profile_ids: uniqueIds });
+    if (!error) return (data || []).map(profile => ({ ...profile, settings: profile.settings || {} }));
+    if (!isMissingRpcError(error)) throw error;
+  } catch (error) {
+    if (!isMissingRpcError(error)) throw error;
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, display_name, email, avatar_url, joined_at, settings')
+    .in('id', uniqueIds);
   if (error) throw error;
   return (data || []).map(profile => ({ ...profile, settings: profile.settings || {} }));
 }
