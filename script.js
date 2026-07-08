@@ -35,6 +35,7 @@ const state = {
   dashboardRange: '30',
   progressRange: '90',
   calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  trainingWeekStart: null,
   editingRunId: null,
   viewingFriend: null,
   friendProfile: null,
@@ -42,7 +43,9 @@ const state = {
   confirmAction: null,
   profilePhotoFile: null,
   isLoading: false,
-  liveRun: { running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '' },
+  liveRun: { mode: 'free', running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '', laps: [], guided: null },
+  leaderboardRuns: null,
+  leaderboardError: null,
 };
 
 const TYPE_STYLES = {
@@ -55,6 +58,8 @@ const TYPE_STYLES = {
   Trail: ['rgba(142,219,156,.13)', 'var(--success)'],
   Other: ['rgba(255,255,255,.09)', 'var(--muted)'],
 };
+
+let leaderboardLoadToken = 0;
 
 function getAchievements() {
   const metric = getDistanceUnit() === 'km';
@@ -343,6 +348,17 @@ function setAuthMessage(message = '', isError = true) {
   const el = $('#auth-message');
   el.textContent = message;
   el.style.color = isError ? 'var(--danger)' : 'var(--success)';
+  el.classList.toggle('success', Boolean(message) && !isError);
+}
+
+function showAuthMode(mode = 'signin') {
+  const registering = mode === 'register';
+  $('#register-form').classList.toggle('hidden', !registering);
+  $('#sign-in-form').classList.toggle('hidden', registering);
+  $('#auth-title').textContent = registering ? 'Create your account' : 'Welcome back';
+  $('#auth-subtitle').textContent = registering ? 'Start with your name, email, and a secure password.' : 'Sign in to view your runs, goals, and training plan.';
+  $('#auth-switch').innerHTML = registering ? 'Already have an account? <strong>Sign in</strong>' : 'New here? <strong>Create an account</strong>';
+  setAuthMessage('');
 }
 
 function showConfigurationMessage() {
@@ -358,6 +374,7 @@ async function boot() {
   initIcons();
   setupChartDefaults();
   bindEvents();
+  state.trainingWeekStart = startOfWeek(new Date());
   restoreLiveRunState();
   renderLiveRun();
   $('#run-date').value = todayISO();
@@ -382,7 +399,7 @@ function showAuth() {
 }
 function exitApp() {
   destroyAllCharts();
-  state.user = null; state.profile = null; state.runs = []; state.friends = []; state.pendingRequests = [];
+  state.user = null; state.profile = null; state.runs = []; state.friends = []; state.pendingRequests = []; state.leaderboardRuns = null; state.leaderboardError = null;
   showAuth();
 }
 
@@ -444,6 +461,7 @@ async function loadRelationships() {
 async function hydrateFriends() {
   const accepted = state.relationships.filter(rel => rel.status === 'accepted');
   const ids = accepted.map(rel => rel.sender_id === state.user.id ? rel.receiver_id : rel.sender_id);
+  state.leaderboardRuns = null; state.leaderboardError = null;
   if (!ids.length) { state.friends = []; return; }
   const data = await fetchProfilesByIds(ids);
   state.friends = (data || []).map(profile => ({ ...profile, settings: profile.settings || {} }));
@@ -460,6 +478,7 @@ function renderAll() {
   renderHistory();
   renderStatistics();
   renderProgress();
+  renderTraining();
   renderFriends();
   renderProfile();
   renderSettings();
@@ -670,6 +689,397 @@ function renderProgress() {
   renderPRChart(rangeRuns);
 }
 
+function addDays(date, days) {
+  const next = startOfDay(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+function clientId(prefix = 'workout') {
+  if (window.crypto?.randomUUID) return `${prefix}-${window.crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function parseTimeInput(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (!text.includes(':')) {
+    const minutes = Number(text);
+    return Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : null;
+  }
+  const parts = text.split(':').map(part => Number(part));
+  if (parts.some(part => !Number.isFinite(part) || part < 0)) return null;
+  if (parts.length === 2) return Math.round(parts[0] * 60 + parts[1]);
+  if (parts.length === 3) return Math.round(parts[0] * 3600 + parts[1] * 60 + parts[2]);
+  return null;
+}
+function formatTimeInput(seconds) {
+  seconds = Math.max(0, Math.round(Number(seconds || 0)));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+function paceInputToSecondsPerKm(value) {
+  const seconds = parseTimeInput(value);
+  if (!seconds) return null;
+  return getDistanceUnit() === 'mi' ? seconds / KM_PER_MILE : seconds;
+}
+function secondsPerKmToDisplay(secondsPerKm, unit = getDistanceUnit()) {
+  if (!Number.isFinite(secondsPerKm) || secondsPerKm <= 0) return null;
+  return unit === 'mi' ? secondsPerKm * KM_PER_MILE : secondsPerKm;
+}
+function formatCanonicalPace(secondsPerKm) {
+  const display = secondsPerKmToDisplay(secondsPerKm);
+  return display ? formatPace(display) : '—';
+}
+function formatCanonicalPace(secondsPerKm) {
+  const display = secondsPerKmToDisplay(secondsPerKm);
+  return display ? formatPace(display) : '--';
+}
+function normalizeInterval(interval) {
+  if (!interval || typeof interval !== 'object') return null;
+  const repetitions = Math.max(1, Math.round(Number(interval.repetitions || 0)));
+  const workSeconds = Math.max(0, Math.round(Number(interval.workSeconds || 0)));
+  const recoverySeconds = Math.max(0, Math.round(Number(interval.recoverySeconds || 0)));
+  if (!repetitions || !workSeconds) return null;
+  return {
+    warmupSeconds: Math.max(0, Math.round(Number(interval.warmupSeconds || 0))),
+    repetitions,
+    workSeconds,
+    recoverySeconds,
+    cooldownSeconds: Math.max(0, Math.round(Number(interval.cooldownSeconds || 0))),
+  };
+}
+function normalizeWorkout(workout) {
+  const status = ['planned', 'completed', 'skipped'].includes(workout?.status) ? workout.status : 'planned';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(workout?.date || '') ? workout.date : todayISO();
+  const runType = TYPE_STYLES[workout?.runType] ? workout.runType : 'Easy';
+  const targetPace = Number(workout?.targetPaceSecondsPerKm);
+  return {
+    id: String(workout?.id || clientId()),
+    date,
+    title: String(workout?.title || `${runType} run`).trim().slice(0, 80),
+    runType,
+    targetDistanceKm: Math.max(0, Number(workout?.targetDistanceKm || 0)),
+    targetPaceSecondsPerKm: Number.isFinite(targetPace) && targetPace > 0 ? targetPace : null,
+    notes: String(workout?.notes || '').slice(0, 700),
+    interval: normalizeInterval(workout?.interval),
+    status,
+    createdAt: workout?.createdAt || new Date().toISOString(),
+  };
+}
+function getTrainingPlan() {
+  const raw = state.profile?.settings?.training_plan;
+  return Array.isArray(raw) ? raw.map(normalizeWorkout).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)) : [];
+}
+function workoutById(id) { return getTrainingPlan().find(workout => workout.id === id); }
+function workoutIntervalSummary(interval) {
+  if (!interval) return '';
+  return `${interval.repetitions} x ${formatTimeInput(interval.workSeconds)} work / ${formatTimeInput(interval.recoverySeconds)} recovery`;
+}
+async function saveTrainingPlan(nextPlan, toastTitle = 'Training plan saved') {
+  if (!state.user || !state.profile) return;
+  const normalized = nextPlan.map(normalizeWorkout);
+  const nextSettings = { ...(state.profile.settings || {}), training_plan: normalized };
+  const { data, error } = await supabase.from('profiles').update({ settings: nextSettings }).eq('id', state.user.id).select().single();
+  if (error) throw error;
+  state.profile = { ...data, settings: data.settings || {} };
+  renderTraining();
+  renderLiveRun();
+  showToast(toastTitle, 'Your settings were merged without changing units or privacy.');
+}
+function workoutsInRange(start, end, plan = getTrainingPlan()) {
+  const startIso = dateToISO(start);
+  const endIso = dateToISO(end);
+  return plan.filter(workout => workout.date >= startIso && workout.date <= endIso);
+}
+function runsInRange(start, end, runs = state.runs) {
+  return runs.filter(run => dateInRange(run.date, start, end));
+}
+function renderTraining() {
+  if (!state.profile) return;
+  if (!state.trainingWeekStart) state.trainingWeekStart = startOfWeek(new Date());
+  refreshUnitLabels();
+  const today = startOfDay(new Date());
+  const currentStart = startOfWeek(today);
+  const currentEnd = addDays(currentStart, 6);
+  const weekStart = startOfDay(state.trainingWeekStart);
+  const weekEnd = addDays(weekStart, 6);
+  const plan = getTrainingPlan();
+  const weekPlan = workoutsInRange(currentStart, currentEnd, plan);
+  const weekRuns = runsInRange(currentStart, currentEnd);
+  const completedDistance = sum(weekRuns, run => run.distance_km);
+  const weeklyGoal = Number(state.profile.weekly_goal_km || 30);
+  const upcomingDistance = sum(weekPlan.filter(workout => workout.status === 'planned' && workout.date >= todayISO()), workout => workout.targetDistanceKm);
+  const completedSessions = weekRuns.length + weekPlan.filter(workout => workout.status === 'completed').length;
+  const cards = [
+    ['COMPLETED', formatDistance(completedDistance, 1), `${Math.min(100, Math.round((completedDistance / weeklyGoal) * 100))}% of weekly goal`, 'rgba(201,255,85,.20)'],
+    ['WEEKLY GOAL', formatDistance(weeklyGoal, 1), `${formatDistance(Math.max(0, weeklyGoal - completedDistance), 1)} remaining`, 'rgba(125,183,255,.18)'],
+    ['UPCOMING', formatDistance(upcomingDistance, 1), 'planned this week', 'rgba(255,200,107,.18)'],
+    ['PLANNED', weekPlan.filter(workout => workout.status === 'planned').length, 'open sessions', 'rgba(255,135,95,.16)'],
+    ['COMPLETED', completedSessions, 'runs and manual completions', 'rgba(142,219,156,.18)'],
+    ['MONTHLY', formatDistance(getStats().monthlyDistance, 1), `${Math.min(100, Math.round((getStats().monthlyDistance / Number(state.profile.monthly_goal_km || 120)) * 100))}% of target`, 'rgba(246,157,232,.15)'],
+  ];
+  $('#training-goal-grid').innerHTML = cards.map(([label, value, sub, accent]) => `<article class="training-goal-card" style="--goal-accent:${accent}"><small>${escapeHTML(label)}</small><strong>${escapeHTML(String(value))}</strong><span>${escapeHTML(sub)}</span></article>`).join('');
+  $('#training-week-label').textContent = `${formatDate(weekStart, { month: 'short', day: 'numeric' })} - ${formatDate(weekEnd, { month: 'short', day: 'numeric' })}`;
+  renderTrainingCalendar(weekStart, plan);
+  renderCoachInsights(plan);
+  renderNextWorkout(plan);
+  populateRaceSourceSelect();
+  renderGuidedWorkoutSelect();
+}
+function renderTrainingCalendar(weekStart, plan) {
+  const runsByDate = new Map();
+  state.runs.forEach(run => {
+    if (!runsByDate.has(run.date)) runsByDate.set(run.date, []);
+    runsByDate.get(run.date).push(run);
+  });
+  const today = todayISO();
+  const cells = [];
+  for (let i = 0; i < 7; i += 1) {
+    const date = addDays(weekStart, i);
+    const iso = dateToISO(date);
+    const dayWorkouts = plan.filter(workout => workout.date === iso);
+    const dayRuns = runsByDate.get(iso) || [];
+    const className = ['training-day', iso === today ? 'today' : '', iso < today ? 'past' : ''].filter(Boolean).join(' ');
+    cells.push(`<section class="${className}" aria-label="${formatDate(iso)}">
+      <div class="training-day-header"><div><strong>${date.toLocaleDateString(undefined, { weekday: 'short' })}</strong><span>${formatDate(iso, { month: 'short', day: 'numeric' })}</span></div>${iso === today ? '<em>Today</em>' : ''}</div>
+      <div class="workout-list">${dayWorkouts.map(renderWorkoutCard).join('')}${dayRuns.map(run => `<button type="button" class="completed-run-chip" data-run-id="${run.id}"><strong>Saved run</strong> ${formatDistance(run.distance_km, 1)} · ${formatPace(getPace(run))}</button>`).join('')}</div>
+      <button class="add-day-workout" type="button" data-workout-action="add" data-date="${iso}">Add workout</button>
+    </section>`);
+  }
+  $('#training-calendar').innerHTML = cells.join('');
+}
+function renderWorkoutCard(workout) {
+  const interval = workoutIntervalSummary(workout.interval);
+  const pace = workout.targetPaceSecondsPerKm ? formatCanonicalPace(workout.targetPaceSecondsPerKm) : '';
+  return `<article class="workout-card ${workout.status}">
+    <div class="workout-card-title"><strong>${escapeHTML(workout.title)}</strong><span class="status-pill ${workout.status}">${escapeHTML(workout.status)}</span></div>
+    <div class="workout-meta"><span>${typePill(workout.runType)}</span><span>${formatDistance(workout.targetDistanceKm, 2)}</span>${pace ? `<span>${pace}</span>` : ''}</div>
+    ${interval ? `<p>${escapeHTML(interval)}</p>` : ''}${workout.notes ? `<p>${escapeHTML(workout.notes)}</p>` : ''}
+    <div class="workout-actions">
+      <button class="btn btn-soft" type="button" data-workout-action="edit" data-workout-id="${workout.id}">Edit</button>
+      <button class="btn btn-ghost" type="button" data-workout-action="move" data-workout-id="${workout.id}">Move</button>
+      <button class="btn btn-soft" type="button" data-workout-action="duplicate" data-workout-id="${workout.id}">Duplicate</button>
+      <button class="btn btn-soft" type="button" data-workout-action="start" data-workout-id="${workout.id}">Start</button>
+      <button class="btn btn-ghost" type="button" data-workout-action="${workout.status === 'completed' ? 'planned' : 'complete'}" data-workout-id="${workout.id}">${workout.status === 'completed' ? 'Reopen' : 'Complete'}</button>
+      <button class="btn btn-ghost" type="button" data-workout-action="skip" data-workout-id="${workout.id}">Skip</button>
+      <button class="btn btn-danger" type="button" data-workout-action="delete" data-workout-id="${workout.id}" aria-label="Delete ${escapeHTML(workout.title)}">Delete</button>
+    </div>
+  </article>`;
+}
+function commonRunType(runs) {
+  const counts = runs.reduce((map, run) => map.set(run.run_type || 'Other', (map.get(run.run_type || 'Other') || 0) + 1), new Map());
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || 'None yet';
+}
+function renderCoachInsights(plan) {
+  const now = new Date();
+  const weekStart = startOfWeek(now);
+  const prevWeekStart = addDays(weekStart, -7);
+  const prevWeekEnd = addDays(weekStart, -1);
+  const monthStart = startOfMonth(now);
+  const weekRuns = runsInRange(weekStart, addDays(weekStart, 6));
+  const prevWeekRuns = runsInRange(prevWeekStart, prevWeekEnd);
+  const last28 = runsInRange(addDays(now, -27), now);
+  const stats = getStats();
+  const weeklyGoal = Number(state.profile.weekly_goal_km || 30);
+  const monthlyGoal = Number(state.profile.monthly_goal_km || 120);
+  const rolling7 = sum(runsInRange(addDays(now, -6), now), run => run.distance_km);
+  const rolling28 = sum(last28, run => run.distance_km);
+  const weekDistance = sum(weekRuns, run => run.distance_km);
+  const prevWeekDistance = sum(prevWeekRuns, run => run.distance_km);
+  const change = prevWeekDistance > 0 ? Math.round(((weekDistance - prevWeekDistance) / prevWeekDistance) * 100) : null;
+  const activeDays = new Set(weekRuns.map(run => run.date)).size;
+  const longest = weekRuns.slice().sort((a, b) => b.distance_km - a.distance_km)[0];
+  const comparable = last28.filter(run => run.distance_km > 0 && run.duration_seconds > 0).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4).reverse();
+  let paceTrend = 'Log a few more comparable runs to see a pace trend.';
+  if (comparable.length >= 4) {
+    const firstHalf = sum(comparable.slice(0, 2), getCanonicalPacePerKm) / 2;
+    const secondHalf = sum(comparable.slice(2), getCanonicalPacePerKm) / 2;
+    const diff = Math.round(secondHalf - firstHalf);
+    paceTrend = Math.abs(diff) < 3 ? 'Your last four comparable runs are holding a steady pace.' : diff < 0 ? `Your last two comparable runs are about ${Math.abs(diff)} sec/km quicker.` : `Your last two comparable runs are about ${diff} sec/km slower. Keep the next efforts controlled.`;
+  }
+  const next = getNextWorkout(plan);
+  const items = [
+    ['target', 'Weekly goal', `You are ${Math.min(100, Math.round((weekDistance / weeklyGoal) * 100))}% of the way to this week's goal.`],
+    ['calendar-range', 'Monthly goal', `This month is at ${Math.min(100, Math.round((stats.monthlyDistance / monthlyGoal) * 100))}% of target.`],
+    ['rotate-ccw', 'Rolling volume', `${formatDistance(rolling7, 1)} over 7 days and ${formatDistance(rolling28, 1)} over 28 days.`],
+    ['trending-up', 'Week change', change === null ? 'No previous-week baseline yet.' : `Your distance is ${change >= 0 ? 'up' : 'down'} ${Math.abs(change)}% from last week.`],
+    ['calendar-days', 'Active days', `${activeDays} active ${activeDays === 1 ? 'day' : 'days'} this week.`],
+    ['mountain', 'Longest this week', longest ? `${formatDistance(longest.distance_km, 1)} on ${formatDate(longest.date, { weekday: 'short' })}.` : 'No saved run yet this week.'],
+    ['layers-3', 'Common type', `${commonRunType(last28)} is your most common run type in the last 28 days.`],
+    ['gauge', 'Pace trend', paceTrend],
+    ['calendar-check-2', 'Next workout', next ? `${next.title} is planned for ${formatDate(next.date, { weekday: 'short', month: 'short', day: 'numeric' })}.` : 'No upcoming workout is planned.'],
+  ];
+  if (stats.streak >= 5) items.push(['moon', 'Rest-day reminder', `You have trained ${stats.streak} consecutive days. A lighter session or rest day may fit well.`]);
+  $('#coach-insights').innerHTML = items.map(([icon, title, copy]) => `<article class="coach-item"><i data-lucide="${icon}"></i><div><strong>${escapeHTML(title)}</strong><p>${escapeHTML(copy)}</p></div></article>`).join('');
+}
+function getNextWorkout(plan = getTrainingPlan()) {
+  const today = todayISO();
+  return plan.filter(workout => workout.status === 'planned' && workout.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+}
+function renderNextWorkout(plan) {
+  const next = getNextWorkout(plan);
+  $('#next-workout-card').innerHTML = next ? renderWorkoutCard(next) : '<div class="center-empty"><div><strong>No upcoming workout</strong><p>Add a session to shape the week.</p><button class="btn btn-soft" type="button" data-workout-action="add">Add workout</button></div></div>';
+}
+function populateRaceSourceSelect() {
+  const select = $('#race-source-run');
+  if (!select) return;
+  const current = select.value;
+  const options = ['<option value="">Manual result</option>', ...state.runs.slice(0, 20).map(run => `<option value="${run.id}">${formatDate(run.date, { month: 'short', day: 'numeric' })} · ${formatDistance(run.distance_km, 1)} · ${formatDuration(run.duration_seconds)}</option>`)];
+  select.innerHTML = options.join('');
+  select.value = state.runs.some(run => run.id === current) ? current : '';
+}
+function calculatePace(event) {
+  event.preventDefault();
+  const solveFor = $('#pace-solve-for').value;
+  const distanceKm = canonicalDistanceFromInput($('#pace-distance'), 0);
+  const timeSeconds = parseTimeInput($('#pace-time').value);
+  const paceSecondsPerKm = paceInputToSecondsPerKm($('#pace-pace').value);
+  let result = '';
+  if (solveFor === 'pace' && distanceKm > 0 && timeSeconds > 0) {
+    result = `<strong>${formatPace(timeSeconds / kmToDisplay(distanceKm))}</strong>${formatDistance(distanceKm)} in ${formatDuration(timeSeconds)}`;
+  } else if (solveFor === 'time' && distanceKm > 0 && paceSecondsPerKm > 0) {
+    const seconds = Math.round(distanceKm * paceSecondsPerKm);
+    result = `<strong>${formatDuration(seconds)}</strong>${formatDistance(distanceKm)} at ${formatCanonicalPace(paceSecondsPerKm)}`;
+  } else if (solveFor === 'distance' && timeSeconds > 0 && paceSecondsPerKm > 0) {
+    const distance = timeSeconds / paceSecondsPerKm;
+    result = `<strong>${formatDistance(distance)}</strong>${formatDuration(timeSeconds)} at ${formatCanonicalPace(paceSecondsPerKm)}`;
+  } else {
+    result = 'Enter the two values needed for the selected solve mode.';
+  }
+  $('#pace-calculator-result').innerHTML = result;
+}
+function handleRaceSourceChange() {
+  const run = state.runs.find(item => item.id === $('#race-source-run').value);
+  if (!run) return;
+  setDistanceInputFromCanonical($('#race-distance'), run.distance_km, 3);
+  $('#race-time').value = formatTimeInput(run.duration_seconds);
+}
+function predictRaces(event) {
+  event.preventDefault();
+  const distanceKm = canonicalDistanceFromInput($('#race-distance'), 0);
+  const timeSeconds = parseTimeInput($('#race-time').value);
+  if (!(distanceKm > 0) || !(timeSeconds > 0)) {
+    $('#race-predictions').innerHTML = '<div class="calculator-result">Enter a valid distance and time first.</div>';
+    return;
+  }
+  const targets = [
+    ['1 mile', KM_PER_MILE],
+    ['5K', 5],
+    ['10K', 10],
+    ['Half marathon', 21.0975],
+    ['Marathon', 42.195],
+  ];
+  $('#race-predictions').innerHTML = targets.map(([label, km]) => {
+    const predicted = Math.round(timeSeconds * Math.pow(km / distanceKm, 1.06));
+    return `<article class="prediction-card"><strong>${label}</strong><b>${formatDuration(predicted)}</b><span>Estimated pace ${formatPace(predicted / kmToDisplay(km))}</span></article>`;
+  }).join('');
+}
+function openWorkoutModal({ date = todayISO(), workout = null } = {}) {
+  const form = $('#workout-form');
+  form.reset();
+  $('#workout-id').value = workout?.id || '';
+  $('#workout-modal-title').textContent = workout ? 'Edit workout' : 'Plan workout';
+  $('#workout-date').value = workout?.date || date;
+  $('#workout-type').value = workout?.runType || 'Easy';
+  $('#workout-title').value = workout?.title || '';
+  if (workout?.targetDistanceKm > 0) setDistanceInputFromCanonical($('#workout-distance'), workout.targetDistanceKm, 2);
+  else { $('#workout-distance').value = ''; clearCanonicalInputMarker($('#workout-distance')); }
+  $('#workout-pace').value = workout?.targetPaceSecondsPerKm ? formatTimeInput(secondsPerKmToDisplay(workout.targetPaceSecondsPerKm)) : '';
+  $('#workout-notes').value = workout?.notes || '';
+  const interval = workout?.interval || null;
+  $('#workout-has-interval').checked = Boolean(interval);
+  $('#workout-interval-fields').classList.toggle('hidden', !interval);
+  $('#workout-warmup').value = interval ? formatTimeInput(interval.warmupSeconds) : '';
+  $('#workout-reps').value = interval?.repetitions || 6;
+  $('#workout-work').value = interval ? formatTimeInput(interval.workSeconds) : '';
+  $('#workout-recovery').value = interval ? formatTimeInput(interval.recoverySeconds) : '';
+  $('#workout-cooldown').value = interval ? formatTimeInput(interval.cooldownSeconds) : '';
+  $('#workout-modal').classList.remove('hidden');
+  initIcons();
+}
+async function saveWorkoutFromForm(event) {
+  event.preventDefault();
+  const title = $('#workout-title').value.trim();
+  const date = $('#workout-date').value || todayISO();
+  const targetDistanceKm = canonicalDistanceFromInput($('#workout-distance'), 0);
+  if (title.length < 2) return showToast('Add a workout title', 'Use at least two characters.', 'error');
+  if (!(targetDistanceKm > 0)) return showToast('Add a target distance', 'Planned workouts need a distance greater than zero.', 'error');
+  const hasInterval = $('#workout-has-interval').checked;
+  const interval = hasInterval ? normalizeInterval({
+    warmupSeconds: parseTimeInput($('#workout-warmup').value) || 0,
+    repetitions: Number($('#workout-reps').value || 0),
+    workSeconds: parseTimeInput($('#workout-work').value) || 0,
+    recoverySeconds: parseTimeInput($('#workout-recovery').value) || 0,
+    cooldownSeconds: parseTimeInput($('#workout-cooldown').value) || 0,
+  }) : null;
+  if (hasInterval && !interval) return showToast('Check interval details', 'Intervals need at least one repetition and a work duration.', 'error');
+  const id = $('#workout-id').value;
+  const existing = id ? workoutById(id) : null;
+  const nextWorkout = normalizeWorkout({
+    ...(existing || {}),
+    id: id || clientId(),
+    date,
+    title,
+    runType: $('#workout-type').value || 'Easy',
+    targetDistanceKm: round(targetDistanceKm, 6),
+    targetPaceSecondsPerKm: paceInputToSecondsPerKm($('#workout-pace').value),
+    notes: $('#workout-notes').value.trim(),
+    interval,
+    status: existing?.status || 'planned',
+    createdAt: existing?.createdAt || new Date().toISOString(),
+  });
+  const plan = getTrainingPlan();
+  const nextPlan = existing ? plan.map(workout => workout.id === id ? nextWorkout : workout) : [...plan, nextWorkout];
+  try {
+    await saveTrainingPlan(nextPlan, existing ? 'Workout updated' : 'Workout planned');
+    closeModal('workout-modal');
+  } catch (error) { showToast('Could not save workout', error.message, 'error'); }
+}
+async function handleWorkoutAction(action, element) {
+  const plan = getTrainingPlan();
+  const id = element.dataset.workoutId;
+  const workout = id ? plan.find(item => item.id === id) : null;
+  if (action === 'add') { openWorkoutModal({ date: element.dataset.date || todayISO() }); return; }
+  if (!workout) return;
+  if (action === 'edit' || action === 'move') { openWorkoutModal({ workout }); if (action === 'move') $('#workout-modal-title').textContent = 'Move workout'; return; }
+  if (action === 'duplicate') {
+    const copy = normalizeWorkout({ ...workout, id: clientId(), title: `${workout.title} copy`, status: 'planned', createdAt: new Date().toISOString() });
+    try { await saveTrainingPlan([...plan, copy], 'Workout duplicated'); } catch (error) { showToast('Could not duplicate workout', error.message, 'error'); }
+    return;
+  }
+  if (action === 'complete' || action === 'skip' || action === 'planned') {
+    const status = action === 'complete' ? 'completed' : action === 'skip' ? 'skipped' : 'planned';
+    try { await saveTrainingPlan(plan.map(item => item.id === id ? { ...item, status } : item), status === 'completed' ? 'Workout completed' : status === 'skipped' ? 'Workout skipped' : 'Workout reopened'); } catch (error) { showToast('Could not update workout', error.message, 'error'); }
+    return;
+  }
+  if (action === 'delete') {
+    showConfirm({ title: 'Delete planned workout?', message: 'This removes it from your training plan history, but saved runs stay untouched.', confirmText: 'Delete workout', action: async () => {
+      try { await saveTrainingPlan(plan.filter(item => item.id !== id), 'Workout deleted'); }
+      catch (error) { showToast('Could not delete workout', error.message, 'error'); }
+    }});
+    return;
+  }
+  if (action === 'start') startWorkoutFromPlan(workout);
+}
+function startWorkoutFromPlan(workout) {
+  const loadWorkout = () => {
+    state.liveRun = defaultLiveRun({
+      mode: workout.interval ? 'guided' : 'free',
+      distanceKm: workout.targetDistanceKm || 0,
+      type: workout.runType || 'Easy',
+      routeName: workout.title || '',
+      guided: workout.interval ? { workoutId: workout.id, stages: buildGuidedStages(workout), stageIndex: 0, stageElapsedMs: 0, stageStartedAtMs: null } : null,
+    });
+    persistLiveRunState();
+    renderLiveRun();
+    navigateTo('live-run');
+    showToast('Workout loaded', workout.interval ? 'Start the guided workout when ready.' : 'Start the free run when ready.');
+  };
+  if (liveRunElapsedMs() > 0 || state.liveRun.laps?.length) showConfirm({ title: 'Load planned workout?', message: 'This clears the current unsaved live timer session.', confirmText: 'Load workout', action: loadWorkout });
+  else loadWorkout();
+}
+
 function renderFriends() {
   const friends = state.friends;
   const requests = state.pendingRequests;
@@ -701,6 +1111,73 @@ function renderFriends() {
       }).join(''); initIcons();
     });
   }
+  renderFriendsLeaderboard();
+}
+
+async function renderFriendsLeaderboard() {
+  const host = $('#friends-leaderboard');
+  if (!host) return;
+  const friends = state.friends || [];
+  if (!friends.length) {
+    host.innerHTML = '<div class="center-empty"><div><strong>No leaderboard yet</strong><p>Add accepted friends to compare this week.</p></div></div>';
+    return;
+  }
+  const weekStart = startOfWeek(new Date());
+  const weekEnd = addDays(weekStart, 6);
+  const recentStartIso = dateToISO(addDays(new Date(), -90));
+  if (!state.leaderboardRuns && !state.leaderboardError) {
+    const token = ++leaderboardLoadToken;
+    host.innerHTML = '<div class="center-empty"><div><div class="loading-line"></div>Loading shared activity...</div></div>';
+    try {
+      const ids = friends.map(friend => friend.id);
+      const { data, error } = await supabase.from('runs').select('*').in('user_id', ids).gte('date', recentStartIso).lte('date', todayISO()).order('date', { ascending: false });
+      if (error) throw error;
+      if (token !== leaderboardLoadToken) return;
+      state.leaderboardRuns = (data || []).map(normalizeRun);
+    } catch (error) {
+      if (token !== leaderboardLoadToken) return;
+      state.leaderboardError = error;
+    }
+    renderFriendsLeaderboard();
+    return;
+  }
+  const makeEntry = (profile, runs, isMe = false) => {
+    const weekRuns = runsInRange(weekStart, weekEnd, runs);
+    const weekDistance = sum(weekRuns, run => run.distance_km);
+    const totalTime = sum(weekRuns, run => run.duration_seconds);
+    return {
+      id: isMe ? state.user.id : profile.id,
+      profile,
+      isMe,
+      private: false,
+      weekDistance,
+      weekRuns: weekRuns.length,
+      streak: currentStreak([...runs].sort((a, b) => a.date.localeCompare(b.date))),
+      avgPace: weekDistance > 0 ? totalTime / kmToDisplay(weekDistance) : Infinity,
+    };
+  };
+  const entries = [makeEntry(state.profile, state.runs, true)];
+  const unavailable = [];
+  friends.forEach(friend => {
+    if (friend.settings?.share_activity === false || state.leaderboardError) {
+      unavailable.push({ profile: friend, private: true, reason: friend.settings?.share_activity === false ? 'Private activity' : 'Activity unavailable' });
+      return;
+    }
+    entries.push(makeEntry(friend, (state.leaderboardRuns || []).filter(run => run.user_id === friend.id)));
+  });
+  entries.sort((a, b) => b.weekDistance - a.weekDistance || b.weekRuns - a.weekRuns);
+  const ranked = entries.map((entry, index) => `<article class="leaderboard-row ${entry.isMe ? 'me' : ''}">
+    <span class="leaderboard-rank">${index + 1}</span>${avatarMarkup(entry.profile)}
+    <div class="leaderboard-main"><strong>${escapeHTML(entry.isMe ? 'You' : entry.profile.display_name || 'Runner')}</strong><span>${entry.isMe ? 'Signed-in runner' : 'Accepted friend'}</span></div>
+    <div class="leaderboard-stats"><div><strong>${formatDistance(entry.weekDistance, 1)}</strong><small>distance</small></div><div><strong>${entry.weekRuns}</strong><small>runs</small></div><div><strong>${entry.streak}</strong><small>streak</small></div><div><strong>${formatPace(entry.avgPace)}</strong><small>avg pace</small></div></div>
+  </article>`);
+  const privateRows = unavailable.map(entry => `<article class="leaderboard-row">
+    <span class="leaderboard-rank">--</span>${avatarMarkup(entry.profile)}
+    <div class="leaderboard-main"><strong>${escapeHTML(entry.profile.display_name || 'Runner')}</strong><span>${escapeHTML(entry.reason)}</span></div>
+    <div class="leaderboard-stats"><div><strong>--</strong><small>distance</small></div><div><strong>--</strong><small>runs</small></div><div><strong>--</strong><small>streak</small></div><div><strong>--</strong><small>avg pace</small></div></div>
+  </article>`);
+  host.innerHTML = [...ranked, ...privateRows].join('');
+  initIcons();
 }
 
 function renderFriendProfile() {
@@ -911,13 +1388,13 @@ function emptyState(icon, title, copy, actionText = '', actionView = '') {
 }
 
 function navigateTo(view, updateHash = true) {
-  const available = ['dashboard','log-run','live-run','history','statistics','progress','friends','friend-profile','compare','profile','settings'];
+  const available = ['dashboard','log-run','live-run','training','history','statistics','progress','friends','friend-profile','compare','profile','settings'];
   if (!available.includes(view)) view = 'dashboard';
   state.activeView = view;
   $$('.view').forEach(el => el.classList.toggle('active-view', el.id === `view-${view}`));
   $$('.nav-link').forEach(link => link.classList.toggle('active', link.dataset.view === view));
   const page = {
-    dashboard: ['OVERVIEW', ''], 'log-run': ['NEW ACTIVITY','Log a run'], 'live-run': ['LIVE ACTIVITY','Live run'], history: ['YOUR ARCHIVE','Run history'], statistics: ['THE DETAILS','Statistics'], progress: ['THE LONG VIEW','Progress'], friends: ['YOUR RUNNING CIRCLE','Friends'], 'friend-profile': ['RUNNING TOGETHER','Friend profile'], compare: ['HEAD TO HEAD','Compare'], profile: ['YOUR RUNNING PROFILE','My profile'], settings: ['YOUR PREFERENCES','Settings'],
+    dashboard: ['OVERVIEW', ''], 'log-run': ['NEW ACTIVITY','Log a run'], 'live-run': ['LIVE ACTIVITY','Live run'], training: ['TRAINING HUB','Training'], history: ['YOUR ARCHIVE','Run history'], statistics: ['THE DETAILS','Statistics'], progress: ['THE LONG VIEW','Progress'], friends: ['YOUR RUNNING CIRCLE','Friends'], 'friend-profile': ['RUNNING TOGETHER','Friend profile'], compare: ['HEAD TO HEAD','Compare'], profile: ['YOUR RUNNING PROFILE','My profile'], settings: ['YOUR PREFERENCES','Settings'],
   }[view];
   $('#page-kicker').textContent = page[0];
   if (view !== 'dashboard') $('#page-title').textContent = page[1]; else renderTopbar();
@@ -926,6 +1403,7 @@ function navigateTo(view, updateHash = true) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (view === 'friend-profile') renderFriendProfile();
   if (view === 'compare') renderCompare();
+  if (view === 'training') renderTraining();
 }
 
 async function handleAuthSubmit(event, mode) {
@@ -949,8 +1427,10 @@ async function handleAuthSubmit(event, mode) {
         await supabase.from('profiles').upsert({ id: data.user.id, display_name: displayName, email, joined_at: new Date().toISOString() });
         await enterApp(data.user);
       } else {
-        setAuthMessage('Account created. Check your email to confirm your address, then sign in.', false);
         $('#register-form').reset();
+        showAuthMode('signin');
+        $('#sign-in-email').value = email;
+        setAuthMessage('Check your email to confirm your account. After confirming, sign in here with the same email.', false);
       }
     }
   } catch (error) {
@@ -1129,15 +1609,24 @@ function captureUnitSensitiveDraft() {
   const runDistanceInput = $('#run-distance');
   const runElevationInput = $('#run-elevation');
   const liveDistanceInput = $('#live-run-distance');
+  const workoutDistanceInput = $('#workout-distance');
+  const paceDistanceInput = $('#pace-distance');
+  const raceDistanceInput = $('#race-distance');
   return {
     runDistanceKm: canonicalDistanceFromInput(runDistanceInput),
     runElevationM: canonicalElevationFromInput(runElevationInput),
     liveDistanceKm: canonicalDistanceFromInput(liveDistanceInput, state.liveRun.distanceKm || 0),
+    workoutDistanceKm: canonicalDistanceFromInput(workoutDistanceInput),
+    paceDistanceKm: canonicalDistanceFromInput(paceDistanceInput),
+    raceDistanceKm: canonicalDistanceFromInput(raceDistanceInput),
   };
 }
 function restoreUnitSensitiveDraft(draft) {
   if (draft.runDistanceKm > 0) setDistanceInputFromCanonical($('#run-distance'), draft.runDistanceKm, 3);
   if (draft.runElevationM > 0) setElevationInputFromCanonical($('#run-elevation'), draft.runElevationM);
+  if (draft.workoutDistanceKm > 0) setDistanceInputFromCanonical($('#workout-distance'), draft.workoutDistanceKm, 2);
+  if (draft.paceDistanceKm > 0) setDistanceInputFromCanonical($('#pace-distance'), draft.paceDistanceKm, 3);
+  if (draft.raceDistanceKm > 0) setDistanceInputFromCanonical($('#race-distance'), draft.raceDistanceKm, 3);
   state.liveRun.distanceKm = draft.liveDistanceKm;
   if ($('#live-run-distance')) {
     if (draft.liveDistanceKm > 0) setDistanceInputFromCanonical($('#live-run-distance'), draft.liveDistanceKm, 3);
@@ -1377,15 +1866,312 @@ function finishLiveRun() {
   showToast('Live time added', 'Review distance and optional details, then save the run.');
 }
 
+let liveAudioContext = null;
+function defaultLiveRun(overrides = {}) {
+  return { mode: 'free', running: false, startedAtMs: null, elapsedMs: 0, distanceKm: 0, type: 'Easy', routeName: '', laps: [], guided: null, ...overrides };
+}
+function liveRunElapsedMs() {
+  return Math.max(0, Number(state.liveRun.elapsedMs || 0) + (state.liveRun.running && state.liveRun.startedAtMs ? Date.now() - state.liveRun.startedAtMs : 0));
+}
+function guidedStageElapsedMs() {
+  const guided = state.liveRun.guided;
+  if (!guided) return 0;
+  return Math.max(0, Number(guided.stageElapsedMs || 0) + (state.liveRun.running && guided.stageStartedAtMs ? Date.now() - guided.stageStartedAtMs : 0));
+}
+function currentGuidedStage() {
+  const guided = state.liveRun.guided;
+  return guided?.stages?.[guided.stageIndex] || null;
+}
+function buildGuidedStages(workout) {
+  const interval = workout?.interval;
+  if (!interval) return [];
+  const stages = [];
+  if (interval.warmupSeconds > 0) stages.push({ label: 'Warm-up', durationSeconds: interval.warmupSeconds, kind: 'warmup' });
+  for (let i = 1; i <= interval.repetitions; i += 1) {
+    stages.push({ label: `Work ${i} of ${interval.repetitions}`, durationSeconds: interval.workSeconds, kind: 'work' });
+    if (interval.recoverySeconds > 0) stages.push({ label: `Recovery ${i} of ${interval.repetitions}`, durationSeconds: interval.recoverySeconds, kind: 'recovery' });
+  }
+  if (interval.cooldownSeconds > 0) stages.push({ label: 'Cooldown', durationSeconds: interval.cooldownSeconds, kind: 'cooldown' });
+  return stages;
+}
+function advanceGuidedIfNeeded() {
+  const guided = state.liveRun.guided;
+  if (state.liveRun.mode !== 'guided' || !state.liveRun.running || !guided?.stages?.length) return;
+  let stage = currentGuidedStage();
+  let elapsed = guidedStageElapsedMs();
+  let changed = false;
+  while (stage && stage.durationSeconds > 0 && elapsed >= stage.durationSeconds * 1000) {
+    elapsed -= stage.durationSeconds * 1000;
+    guided.stageIndex += 1;
+    changed = true;
+    stage = currentGuidedStage();
+    notifyStageChange(stage?.label || 'Complete');
+  }
+  if (!stage) {
+    state.liveRun.elapsedMs = liveRunElapsedMs();
+    state.liveRun.running = false;
+    state.liveRun.startedAtMs = null;
+    guided.stageElapsedMs = 0;
+    guided.stageStartedAtMs = null;
+    persistLiveRunState();
+    return;
+  }
+  if (changed) {
+    guided.stageElapsedMs = elapsed;
+    guided.stageStartedAtMs = Date.now() - elapsed;
+    persistLiveRunState();
+  }
+}
+function persistLiveRunState() {
+  const payload = { ...state.liveRun, savedAt: Date.now() };
+  try { localStorage.setItem(LIVE_RUN_STORAGE_KEY, JSON.stringify(payload)); } catch (_) { /* non-critical browser storage failure */ }
+}
+function restoreLiveRunState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LIVE_RUN_STORAGE_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return;
+    state.liveRun = defaultLiveRun({
+      mode: saved.mode === 'guided' ? 'guided' : 'free',
+      running: Boolean(saved.running),
+      startedAtMs: Number(saved.startedAtMs) || null,
+      elapsedMs: Math.max(0, Number(saved.elapsedMs) || 0),
+      distanceKm: Math.max(0, Number(saved.distanceKm) || 0),
+      type: TYPE_STYLES[saved.type] ? saved.type : 'Easy',
+      routeName: String(saved.routeName || '').slice(0, 80),
+      laps: Array.isArray(saved.laps) ? saved.laps.map(lap => ({ id: String(lap.id || clientId('lap')), elapsedMs: Math.max(0, Number(lap.elapsedMs || 0)), at: lap.at || new Date().toISOString() })) : [],
+      guided: saved.guided && typeof saved.guided === 'object' ? {
+        workoutId: saved.guided.workoutId || null,
+        stages: Array.isArray(saved.guided.stages) ? saved.guided.stages.map(stage => ({ label: String(stage.label || 'Stage'), durationSeconds: Math.max(0, Number(stage.durationSeconds || 0)), kind: stage.kind || 'stage' })) : [],
+        stageIndex: Math.max(0, Number(saved.guided.stageIndex || 0)),
+        stageElapsedMs: Math.max(0, Number(saved.guided.stageElapsedMs || 0)),
+        stageStartedAtMs: Number(saved.guided.stageStartedAtMs) || null,
+      } : null,
+    });
+    if (state.liveRun.running && !state.liveRun.startedAtMs) state.liveRun.running = false;
+    if (state.liveRun.running && state.liveRun.mode === 'guided' && state.liveRun.guided && !state.liveRun.guided.stageStartedAtMs) state.liveRun.guided.stageStartedAtMs = Date.now();
+  } catch (_) { /* start fresh if browser storage is malformed */ }
+}
+function liveRunStatus() {
+  if (state.liveRun.mode === 'guided') {
+    const stage = currentGuidedStage();
+    if (!stage && state.liveRun.guided?.stages?.length) return { label: 'WORKOUT COMPLETE', copy: 'Finish and review the run before saving it.', state: 'Complete', button: 'Review workout', icon: 'check-circle-2' };
+    if (!stage) return { label: 'SELECT WORKOUT', copy: 'Choose a planned interval workout from the sidebar.', state: 'Ready', button: 'Start workout', icon: 'play' };
+    if (state.liveRun.running) return { label: 'GUIDED WORKOUT', copy: 'Follow the current stage. The timer is based on the real clock.', state: 'Running', button: 'Pause workout', icon: 'pause' };
+    if (liveRunElapsedMs() > 0 || guidedStageElapsedMs() > 0) return { label: 'PAUSED', copy: 'Resume when you are ready, or skip to the next stage.', state: 'Paused', button: 'Resume workout', icon: 'play' };
+    return { label: 'READY WHEN YOU ARE', copy: 'Start when you are ready for the first stage.', state: 'Ready', button: 'Start workout', icon: 'play' };
+  }
+  if (state.liveRun.running) return { label: 'RUNNING NOW', copy: 'Your elapsed time is advancing from the real clock.', state: 'Running', button: 'Pause run', icon: 'pause' };
+  if (liveRunElapsedMs() > 0) return { label: 'PAUSED', copy: 'Your time is held. Resume when you are ready.', state: 'Paused', button: 'Resume run', icon: 'play' };
+  return { label: 'READY WHEN YOU ARE', copy: 'Press start when you move. Add distance whenever you know it.', state: 'Ready', button: 'Start run', icon: 'play' };
+}
+function renderLiveRun() {
+  advanceGuidedIfNeeded();
+  const elapsedSeconds = Math.floor(liveRunElapsedMs() / 1000);
+  const status = liveRunStatus();
+  const distanceKm = Math.max(0, Number(state.liveRun.distanceKm || 0));
+  const distance = kmToDisplay(distanceKm);
+  const liveDistanceInput = $('#live-run-distance');
+  if (!liveDistanceInput) return;
+  if (document.activeElement !== liveDistanceInput) {
+    if (distanceKm > 0) setDistanceInputFromCanonical(liveDistanceInput, distanceKm, 3);
+    else { liveDistanceInput.value = ''; delete liveDistanceInput.dataset.canonicalKm; delete liveDistanceInput.dataset.renderedValue; }
+  }
+  $('#live-run-type').value = state.liveRun.type || 'Easy';
+  if (document.activeElement !== $('#live-run-route')) $('#live-run-route').value = state.liveRun.routeName || '';
+  const guidedMode = state.liveRun.mode === 'guided';
+  const stage = currentGuidedStage();
+  const stageElapsed = Math.floor(guidedStageElapsedMs() / 1000);
+  const displaySeconds = guidedMode && stage?.durationSeconds ? Math.max(0, stage.durationSeconds - stageElapsed) : elapsedSeconds;
+  $('#live-run-elapsed').textContent = formatDuration(displaySeconds);
+  $('#live-run-status').textContent = status.label;
+  $('#live-run-copy').textContent = status.copy;
+  $('#live-run-state-label').textContent = status.state;
+  $('#live-run-pace').textContent = distance > 0 && elapsedSeconds > 0 ? formatPace(elapsedSeconds / distance) : 'â€”';
+  if (!distance || elapsedSeconds <= 0) $('#live-run-pace').textContent = '--';
+  $('#live-run-stage-title').textContent = guidedMode ? 'Guided interval workout' : 'Live run stopwatch';
+  $('#guided-stage-label').classList.toggle('hidden', !guidedMode);
+  $('#guided-stage-label').textContent = guidedMode ? (stage?.label || 'Complete') : 'Free Run';
+  $('#guided-progress-track').classList.toggle('hidden', !guidedMode);
+  const progress = guidedMode && stage?.durationSeconds ? Math.min(100, (stageElapsed / stage.durationSeconds) * 100) : guidedMode && !stage && state.liveRun.guided?.stages?.length ? 100 : 0;
+  $('#guided-progress-bar').style.width = `${progress}%`;
+  const dot = $('#live-run-status-dot'); dot.classList.toggle('running', state.liveRun.running); dot.classList.toggle('paused', !state.liveRun.running && elapsedSeconds > 0);
+  const startButton = $('#live-run-start-pause');
+  startButton.innerHTML = `<i data-lucide="${status.icon}"></i><span>${status.button}</span>`;
+  $('#live-run-lap').classList.toggle('hidden', guidedMode);
+  $('#live-run-lap').disabled = guidedMode || elapsedSeconds < 1;
+  $('#live-guided-skip').classList.toggle('hidden', !guidedMode);
+  $('#live-guided-skip').disabled = !guidedMode || !stage;
+  $('#live-run-finish').disabled = elapsedSeconds < 1;
+  $('#guided-workout-panel').classList.toggle('hidden', !guidedMode);
+  $$('[data-live-mode]').forEach(button => button.classList.toggle('active', button.dataset.liveMode === state.liveRun.mode));
+  renderLiveLaps();
+  renderGuidedWorkoutSelect();
+  renderGuidedTimeline();
+  if (state.liveRun.running && !liveRunTick) liveRunTick = window.setInterval(renderLiveRun, 250);
+  if (!state.liveRun.running && liveRunTick) { window.clearInterval(liveRunTick); liveRunTick = null; }
+  initIcons();
+}
+function toggleLiveRun() {
+  if (state.liveRun.running) {
+    state.liveRun.elapsedMs = liveRunElapsedMs(); state.liveRun.startedAtMs = null; state.liveRun.running = false;
+    if (state.liveRun.guided) { state.liveRun.guided.stageElapsedMs = guidedStageElapsedMs(); state.liveRun.guided.stageStartedAtMs = null; }
+  } else {
+    if (state.liveRun.mode === 'guided' && !currentGuidedStage()) return showToast('Choose a guided workout', 'Select a planned interval workout before starting.', 'error');
+    state.liveRun.startedAtMs = Date.now(); state.liveRun.running = true;
+    if (state.liveRun.guided) state.liveRun.guided.stageStartedAtMs = Date.now();
+  }
+  persistLiveRunState(); renderLiveRun();
+}
+function setLiveRunMode(mode) {
+  if (!['free', 'guided'].includes(mode) || mode === state.liveRun.mode) return;
+  const switchMode = () => {
+    state.liveRun = defaultLiveRun({ mode });
+    if (mode === 'guided') {
+      const next = getTrainingPlan().find(workout => workout.interval && workout.status === 'planned');
+      if (next) selectGuidedWorkout(next.id, { silent: true });
+    }
+    persistLiveRunState(); renderLiveRun();
+  };
+  if (liveRunElapsedMs() > 0 || state.liveRun.laps?.length) showConfirm({ title: 'Switch live mode?', message: 'This clears the current unsaved live timer session.', confirmText: 'Switch mode', action: switchMode });
+  else switchMode();
+}
+function resetLiveRun() {
+  const hasProgress = liveRunElapsedMs() > 0 || state.liveRun.distanceKm > 0 || state.liveRun.laps?.length;
+  const performReset = () => {
+    const mode = state.liveRun.mode || 'free';
+    state.liveRun = defaultLiveRun({ mode });
+    try { localStorage.removeItem(LIVE_RUN_STORAGE_KEY); } catch (_) { /* non-critical */ }
+    renderLiveRun(); showToast('Live run reset', 'The stopwatch and live details are ready for a fresh start.');
+  };
+  if (hasProgress) showConfirm({ title: 'Reset this live run?', message: 'Its elapsed time and unsaved details will be cleared.', confirmText: 'Reset run', action: performReset }); else performReset();
+}
+function finishLiveRun() {
+  if (state.liveRun.running) toggleLiveRun();
+  const elapsedSeconds = Math.floor(liveRunElapsedMs() / 1000);
+  if (elapsedSeconds < 1) return showToast('Start the timer first', 'The live run needs at least one second before review.', 'error');
+  const workout = state.liveRun.guided?.workoutId ? workoutById(state.liveRun.guided.workoutId) : null;
+  const h = Math.floor(elapsedSeconds / 3600); const m = Math.floor((elapsedSeconds % 3600) / 60); const s = elapsedSeconds % 60;
+  $('#run-hours').value = h; $('#run-minutes').value = m; $('#run-seconds').value = s;
+  if (state.liveRun.distanceKm > 0) setDistanceInputFromCanonical($('#run-distance'), state.liveRun.distanceKm, 3);
+  else { $('#run-distance').value = ''; delete $('#run-distance').dataset.canonicalKm; delete $('#run-distance').dataset.renderedValue; }
+  $('#run-date').value = todayISO(); $('#run-type').value = state.liveRun.type || 'Easy'; $('#run-route').value = state.liveRun.routeName || '';
+  if (state.liveRun.mode === 'guided') $('#run-notes').value = guidedWorkoutSummary(workout, elapsedSeconds);
+  else if (state.liveRun.laps?.length) $('#run-notes').value = freeRunLapSummary(elapsedSeconds);
+  state.editingRunId = null; $('#run-form button[type="submit"]').innerHTML = '<i data-lucide="check"></i>Save run';
+  updateRunPreview(); navigateTo('log-run'); initIcons();
+  showToast('Live time added', 'Review distance and optional details, then save the run.');
+}
+function addLiveLap() {
+  const elapsedMs = liveRunElapsedMs();
+  if (elapsedMs < 1000 || state.liveRun.mode !== 'free') return;
+  state.liveRun.laps = [...(state.liveRun.laps || []), { id: clientId('lap'), elapsedMs, at: new Date().toISOString() }];
+  persistLiveRunState(); renderLiveRun(); notifyStageChange('Lap');
+}
+function clearLiveLaps() {
+  if (!state.liveRun.laps?.length) return;
+  showConfirm({ title: 'Clear lap list?', message: 'This only clears the current live-session lap list.', confirmText: 'Clear laps', action: () => {
+    state.liveRun.laps = []; persistLiveRunState(); renderLiveRun();
+  }});
+}
+function renderLiveLaps() {
+  const host = $('#live-lap-list');
+  if (!host) return;
+  const laps = state.liveRun.laps || [];
+  if (!laps.length) { host.innerHTML = '<div class="center-empty"><div><strong>No laps yet</strong><p>Use the lap button during a free run.</p></div></div>'; return; }
+  const distance = kmToDisplay(state.liveRun.distanceKm || 0);
+  host.innerHTML = laps.map((lap, index) => {
+    const previous = index ? laps[index - 1].elapsedMs : 0;
+    const lapSeconds = Math.round((lap.elapsedMs - previous) / 1000);
+    const cumulativeSeconds = Math.round(lap.elapsedMs / 1000);
+    const pace = distance > 0 ? formatPace(cumulativeSeconds / distance) : '--';
+    return `<div class="lap-row"><b>${index + 1}</b><div><strong>${formatDuration(lapSeconds)}</strong><span>Cumulative ${formatDuration(cumulativeSeconds)}</span></div><small>${pace}</small></div>`;
+  }).join('');
+}
+function renderGuidedWorkoutSelect() {
+  const select = $('#guided-workout-select');
+  if (!select) return;
+  const workouts = getTrainingPlan().filter(workout => workout.interval && workout.status === 'planned');
+  const selected = state.liveRun.guided?.workoutId || '';
+  select.innerHTML = workouts.length
+    ? workouts.map(workout => `<option value="${workout.id}">${formatDate(workout.date, { month: 'short', day: 'numeric' })} · ${escapeHTML(workout.title)}</option>`).join('')
+    : '<option value="">No planned interval workouts</option>';
+  select.disabled = !workouts.length;
+  select.value = workouts.some(workout => workout.id === selected) ? selected : '';
+}
+function selectGuidedWorkout(id, { silent = false } = {}) {
+  const workout = workoutById(id);
+  if (!workout?.interval) {
+    if (!silent) showToast('No interval selected', 'Choose a planned interval workout from Training.', 'error');
+    return;
+  }
+  state.liveRun = defaultLiveRun({
+    mode: 'guided',
+    distanceKm: workout.targetDistanceKm || 0,
+    type: workout.runType || 'Intervals',
+    routeName: workout.title || 'Guided workout',
+    guided: { workoutId: workout.id, stages: buildGuidedStages(workout), stageIndex: 0, stageElapsedMs: 0, stageStartedAtMs: null },
+  });
+  persistLiveRunState(); renderLiveRun();
+}
+function renderGuidedTimeline() {
+  const host = $('#guided-timeline');
+  if (!host) return;
+  const guided = state.liveRun.guided;
+  if (state.liveRun.mode !== 'guided' || !guided?.stages?.length) { host.innerHTML = '<div class="center-empty"><div><strong>No guided workout selected</strong><p>Plan an interval workout in Training.</p></div></div>'; return; }
+  host.innerHTML = guided.stages.map((stage, index) => `<div class="guided-step ${index === guided.stageIndex ? 'active' : index < guided.stageIndex ? 'done' : ''}"><strong>${escapeHTML(stage.label)}</strong><span>${formatTimeInput(stage.durationSeconds)}</span></div>`).join('');
+}
+function skipGuidedStage() {
+  const guided = state.liveRun.guided;
+  if (state.liveRun.mode !== 'guided' || !guided) return;
+  guided.stageIndex = Math.min(guided.stages.length, guided.stageIndex + 1);
+  guided.stageElapsedMs = 0;
+  guided.stageStartedAtMs = state.liveRun.running ? Date.now() : null;
+  notifyStageChange(currentGuidedStage()?.label || 'Complete');
+  persistLiveRunState(); renderLiveRun();
+}
+function guidedWorkoutSummary(workout, elapsedSeconds) {
+  const stages = state.liveRun.guided?.stages || [];
+  const lines = [`Guided workout: ${workout?.title || state.liveRun.routeName || 'Workout'}`, `Total duration: ${formatDuration(elapsedSeconds)}`];
+  if (workout?.targetDistanceKm) lines.push(`Target distance: ${formatDistance(workout.targetDistanceKm)}`);
+  if (workout?.targetPaceSecondsPerKm) lines.push(`Target pace: ${formatCanonicalPace(workout.targetPaceSecondsPerKm)}`);
+  if (stages.length) lines.push(`Structure: ${stages.map(stage => `${stage.label} ${formatTimeInput(stage.durationSeconds)}`).join('; ')}`);
+  if (workout?.notes) lines.push(`Plan notes: ${workout.notes}`);
+  return lines.join('\n');
+}
+function freeRunLapSummary(elapsedSeconds) {
+  const lines = [`Live run duration: ${formatDuration(elapsedSeconds)}`, `Manual laps: ${state.liveRun.laps.length}`];
+  state.liveRun.laps.forEach((lap, index) => {
+    const previous = index ? state.liveRun.laps[index - 1].elapsedMs : 0;
+    lines.push(`Lap ${index + 1}: ${formatDuration(Math.round((lap.elapsedMs - previous) / 1000))} cumulative ${formatDuration(Math.round(lap.elapsedMs / 1000))}`);
+  });
+  return lines.join('\n');
+}
+function requestStageNotifications() {
+  if (!('Notification' in window)) return showToast('Notifications unavailable', 'This browser does not support workout notifications.', 'error');
+  Notification.requestPermission().then(permission => showToast(permission === 'granted' ? 'Stage alerts enabled' : 'Stage alerts not enabled', permission === 'granted' ? 'FytRun can notify you at stage changes.' : 'You can continue without notifications.', permission === 'granted' ? 'success' : 'error'));
+}
+function notifyStageChange(label) {
+  if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      liveAudioContext ||= new AudioContextClass();
+      const oscillator = liveAudioContext.createOscillator();
+      const gain = liveAudioContext.createGain();
+      oscillator.frequency.value = 880; gain.gain.value = 0.035;
+      oscillator.connect(gain).connect(liveAudioContext.destination);
+      oscillator.start(); oscillator.stop(liveAudioContext.currentTime + 0.08);
+    }
+  } catch (_) { /* optional feedback only */ }
+  if ('Notification' in window && Notification.permission === 'granted' && document.hidden) new Notification('FytRun workout', { body: label });
+}
+
 function bindEvents() {
   $('#sign-in-form').addEventListener('submit', event => handleAuthSubmit(event, 'signin'));
   $('#register-form').addEventListener('submit', event => handleAuthSubmit(event, 'register'));
   $('#auth-switch').addEventListener('click', () => {
     const registering = !$('#register-form').classList.contains('hidden');
-    $('#register-form').classList.toggle('hidden', registering); $('#sign-in-form').classList.toggle('hidden', !registering);
-    $('#auth-title').textContent = registering ? 'Welcome back' : 'Start your running story'; $('#auth-subtitle').textContent = registering ? 'Sign in to continue your training.' : 'Create a private home for every run.';
-    $('#auth-switch').innerHTML = registering ? 'New here? <strong>Create an account</strong>' : 'Already running with us? <strong>Sign in</strong>';
-    setAuthMessage('');
+    showAuthMode(registering ? 'signin' : 'register');
   });
   $('#run-form').addEventListener('submit', handleRunSubmit);
   // Preserve exact canonical values only until a field is actually edited.
@@ -1397,6 +2183,10 @@ function bindEvents() {
   $('#run-elevation').addEventListener('input', () => clearCanonicalInputMarker($('#run-elevation'), 'elevation'));
   ['#run-distance','#run-hours','#run-minutes','#run-seconds','#run-type'].forEach(selector => $(selector).addEventListener('input', updateRunPreview));
   $('#live-run-start-pause').addEventListener('click', toggleLiveRun); $('#live-run-reset').addEventListener('click', resetLiveRun); $('#live-run-finish').addEventListener('click', finishLiveRun);
+  $('#live-run-lap').addEventListener('click', addLiveLap); $('#live-run-clear-laps').addEventListener('click', clearLiveLaps); $('#live-guided-skip').addEventListener('click', skipGuidedStage);
+  $$('[data-live-mode]').forEach(button => button.addEventListener('click', () => setLiveRunMode(button.dataset.liveMode)));
+  $('#guided-workout-select').addEventListener('change', () => selectGuidedWorkout($('#guided-workout-select').value));
+  $('#guided-request-notifications').addEventListener('click', requestStageNotifications);
   $('#live-run-distance').addEventListener('input', updateLiveRunDistance); $('#live-run-type').addEventListener('change', updateLiveRunMeta); $('#live-run-route').addEventListener('input', updateLiveRunMeta);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) renderLiveRun(); });
   $('#discard-run-btn').addEventListener('click', () => { state.editingRunId = null; resetRunForm(); showToast('Form cleared', 'Ready whenever your next run is.'); });
@@ -1409,6 +2199,18 @@ function bindEvents() {
   $('#history-search').addEventListener('input', applyHistoryFilters); ['#filter-run-type','#filter-distance','#history-sort'].forEach(selector => $(selector).addEventListener('change', applyHistoryFilters));
   $('#calendar-prev').addEventListener('click', () => { state.calendarMonth = new Date(state.calendarMonth.getFullYear(), state.calendarMonth.getMonth() - 1, 1); renderCalendar(); });
   $('#calendar-next').addEventListener('click', () => { state.calendarMonth = new Date(state.calendarMonth.getFullYear(), state.calendarMonth.getMonth() + 1, 1); renderCalendar(); });
+  $('#add-workout-btn').addEventListener('click', () => openWorkoutModal({ date: todayISO() }));
+  $('#training-prev-week').addEventListener('click', () => { state.trainingWeekStart = addDays(state.trainingWeekStart || startOfWeek(new Date()), -7); renderTraining(); initIcons(); });
+  $('#training-current-week').addEventListener('click', () => { state.trainingWeekStart = startOfWeek(new Date()); renderTraining(); initIcons(); });
+  $('#training-next-week').addEventListener('click', () => { state.trainingWeekStart = addDays(state.trainingWeekStart || startOfWeek(new Date()), 7); renderTraining(); initIcons(); });
+  $('#workout-form').addEventListener('submit', saveWorkoutFromForm);
+  $('#workout-has-interval').addEventListener('change', () => $('#workout-interval-fields').classList.toggle('hidden', !$('#workout-has-interval').checked));
+  $('#workout-distance').addEventListener('input', () => clearCanonicalInputMarker($('#workout-distance')));
+  $('#pace-distance').addEventListener('input', () => clearCanonicalInputMarker($('#pace-distance')));
+  $('#race-distance').addEventListener('input', () => clearCanonicalInputMarker($('#race-distance')));
+  $('#pace-calculator-form').addEventListener('submit', calculatePace);
+  $('#race-predictor-form').addEventListener('submit', predictRaces);
+  $('#race-source-run').addEventListener('change', handleRaceSourceChange);
   $('#friend-search-btn').addEventListener('click', searchFriends); $('#friend-search').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchFriends(); } });
   $('#goal-settings-form').addEventListener('submit', saveGoals); $('#privacy-settings-form').addEventListener('submit', savePrivacy);
   $('#export-csv-btn').addEventListener('click', exportCSV); $('#settings-export-btn').addEventListener('click', exportCSV); $('#import-csv-input').addEventListener('change', event => importCSV(event.target.files[0]));
@@ -1426,6 +2228,8 @@ function bindEvents() {
 async function handleDelegatedClick(event) {
   const unitChoice = event.target.closest('[data-distance-unit-choice]');
   if (unitChoice) { await setDistanceUnit(unitChoice.dataset.distanceUnitChoice); return; }
+  const workoutAction = event.target.closest('[data-workout-action]');
+  if (workoutAction) { await handleWorkoutAction(workoutAction.dataset.workoutAction, workoutAction); return; }
   const nav = event.target.closest('[data-view]');
   if (nav && nav.dataset.view) { event.preventDefault(); navigateTo(nav.dataset.view); if (nav.closest('#profile-menu')) $('#profile-menu').classList.add('hidden'); return; }
   const runEl = event.target.closest('[data-run-id]');

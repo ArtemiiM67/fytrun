@@ -32,9 +32,9 @@
           <span>Fyt<span>Run</span></span>
         </a>
         <div class="auth-copy">
-          <p class="eyebrow">RUN WITH INTENTION</p>
-          <h1>Your running life,<br /><em>beautifully measured.</em></h1>
-          <p>Track every run, see the work compound, and keep your people close to the journey.</p>
+          <p class="eyebrow">WELCOME TO FYTRUN</p>
+          <h1>Track your running,<br /><em>without the clutter.</em></h1>
+          <p>Log runs, follow progress, and keep your training history in one private place.</p>
         </div>
         <div class="auth-proof">
           <div class="proof-stack">
@@ -55,7 +55,7 @@
           <div class="auth-card-heading">
             <p class="eyebrow">YOUR RUNNING SPACE</p>
             <h2 id="auth-title">Welcome back</h2>
-            <p id="auth-subtitle">Sign in to continue your training.</p>
+            <p id="auth-subtitle">Sign in to view your runs, goals, and training plan.</p>
           </div>
 
           <form id="sign-in-form" class="auth-form" novalidate>
@@ -73,7 +73,7 @@
 
           <button id="auth-switch" class="text-button auth-switch" type="button">New here? <strong>Create an account</strong></button>
           <p id="auth-message" class="auth-message" role="status"></p>
-          <p class="auth-footnote">Your runs are yours. Your data is stored securely in your private account.</p>
+          <p class="auth-footnote">Use the same email you registered with. New accounts may need email confirmation before sign-in.</p>
         </div>
       </div>
     </div>
@@ -94,6 +94,7 @@
         <a href="#dashboard" class="nav-link active" data-view="dashboard"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
         <a href="#log-run" class="nav-link nav-link-emphasis" data-view="log-run"><i data-lucide="plus"></i><span>Log a run</span></a>
         <a href="#live-run" class="nav-link" data-view="live-run"><i data-lucide="timer"></i><span>Live run</span></a>
+        <a href="#training" class="nav-link" data-view="training"><i data-lucide="calendar-check-2"></i><span>Training</span></a>
         <a href="#history" class="nav-link" data-view="history"><i data-lucide="route"></i><span>Run history</span></a>
         <a href="#statistics" class="nav-link" data-view="statistics"><i data-lucide="bar-chart-3"></i><span>Statistics</span></a>
         <a href="#progress" class="nav-link" data-view="progress"><i data-lucide="trending-up"></i><span>Progress</span></a>
@@ -221,21 +222,37 @@
             <div><p class="eyebrow">LIVE ACTIVITY</p><h2>Run in the moment.</h2><p>Use a focused, timestamp-based stopwatch, then send the elapsed time straight into your run log.</p></div>
             <div class="pace-prompt"><i data-lucide="timer-reset"></i><span>The timer catches up from the real clock after backgrounding or a refresh.</span></div>
           </div>
+          <div class="live-mode-switch segmented" role="group" aria-label="Live run mode">
+            <button id="live-mode-free" class="active" type="button" data-live-mode="free">Free Run</button>
+            <button id="live-mode-guided" type="button" data-live-mode="guided">Guided Workout</button>
+          </div>
           <div class="live-run-layout">
             <article class="panel live-run-stage">
               <div class="live-run-stage-top">
-                <div><p class="eyebrow live-status-line"><span id="live-run-status-dot" class="live-status-dot"></span><span id="live-run-status">READY WHEN YOU ARE</span></p><h3>Live run stopwatch</h3></div>
+                <div><p class="eyebrow live-status-line"><span id="live-run-status-dot" class="live-status-dot"></span><span id="live-run-status">READY WHEN YOU ARE</span></p><h3 id="live-run-stage-title">Live run stopwatch</h3></div>
                 <button id="live-run-reset" class="icon-btn subtle" type="button" aria-label="Reset live run"><i data-lucide="rotate-ccw"></i></button>
               </div>
+              <div id="guided-stage-label" class="guided-stage-label hidden">Free Run</div>
               <div id="live-run-elapsed" class="live-run-elapsed" role="timer" aria-live="off">00:00:00</div>
+              <div id="guided-progress-track" class="guided-progress-track hidden" aria-hidden="true"><span id="guided-progress-bar"></span></div>
               <p id="live-run-copy" class="live-run-copy">Press start when you move. Add distance whenever you know it.</p>
               <div class="live-run-controls">
                 <button id="live-run-start-pause" class="btn btn-primary live-run-main-btn" type="button"><i data-lucide="play"></i><span>Start run</span></button>
+                <button id="live-run-lap" class="btn btn-soft" type="button" disabled><i data-lucide="flag"></i><span>Lap</span></button>
+                <button id="live-guided-skip" class="btn btn-soft hidden" type="button" disabled><i data-lucide="skip-forward"></i><span>Skip stage</span></button>
                 <button id="live-run-finish" class="btn btn-soft" type="button" disabled><i data-lucide="check-circle-2"></i><span>Finish &amp; review</span></button>
               </div>
               <div class="live-run-trust-row"><span><i data-lucide="clock-3"></i> Timestamp-based timing</span><span><i data-lucide="refresh-cw"></i> Restores after refresh</span></div>
             </article>
             <aside class="live-run-aside">
+              <article id="guided-workout-panel" class="panel live-guided-panel hidden">
+                <div class="panel-heading"><div><p class="eyebrow">GUIDED WORKOUT</p><h3>Planned intervals</h3></div></div>
+                <div class="live-distance-form">
+                  <label class="form-field">Workout<select id="guided-workout-select"></select></label>
+                  <button id="guided-request-notifications" class="btn btn-ghost" type="button"><i data-lucide="bell"></i>Enable stage alerts</button>
+                </div>
+                <div id="guided-timeline" class="guided-timeline"></div>
+              </article>
               <article class="panel live-distance-panel">
                 <div class="panel-heading"><div><p class="eyebrow">LIVE DETAILS</p><h3>Your effort</h3></div></div>
                 <div class="live-distance-form">
@@ -245,7 +262,67 @@
                 </div>
                 <div class="live-pace-block"><span><small>LIVE PACE</small><strong id="live-run-pace">—</strong></span><span><small>STATUS</small><strong id="live-run-state-label">Ready</strong></span></div>
               </article>
+              <article class="panel live-laps-panel">
+                <div class="panel-heading"><div><p class="eyebrow">LAPS</p><h3>Manual splits</h3></div><button id="live-run-clear-laps" class="text-button" type="button">Clear</button></div>
+                <div id="live-lap-list" class="lap-list"></div>
+              </article>
               <article class="live-run-note"><span><i data-lucide="shield-check"></i></span><div><strong>You stay in control.</strong><p>FytRun does not guess your route or distance. Enter the distance you actually completed, then review all details before saving.</p></div></article>
+            </aside>
+          </div>
+        </section>
+
+        <!-- Training -->
+        <section id="view-training" class="view">
+          <div class="view-heading">
+            <div><p class="eyebrow">TRAINING HUB</p><h2>Plan the next block.</h2><p>Build the week, run the work, and keep the signal clear.</p></div>
+            <button id="add-workout-btn" class="btn btn-primary" type="button"><i data-lucide="plus"></i><span>Add workout</span></button>
+          </div>
+          <div id="training-goal-grid" class="training-goal-grid"></div>
+          <div class="training-layout">
+            <div class="training-main">
+              <article class="panel training-calendar-panel">
+                <div class="panel-heading">
+                  <div><p class="eyebrow">WEEKLY PLAN</p><h3 id="training-week-label">This week</h3></div>
+                  <div class="calendar-switch">
+                    <button id="training-prev-week" class="icon-btn subtle" type="button" aria-label="Previous week"><i data-lucide="chevron-left"></i></button>
+                    <button id="training-current-week" class="text-button" type="button">Today</button>
+                    <button id="training-next-week" class="icon-btn subtle" type="button" aria-label="Next week"><i data-lucide="chevron-right"></i></button>
+                  </div>
+                </div>
+                <div id="training-calendar" class="training-calendar" aria-label="Monday through Sunday training plan"></div>
+              </article>
+              <article class="panel calculator-panel">
+                <div class="panel-heading"><div><p class="eyebrow">PACE + RACE</p><h3>Calculator</h3></div><span class="panel-note">Estimates only</span></div>
+                <div class="calculator-grid">
+                  <form id="pace-calculator-form" class="calculator-box" novalidate>
+                    <h4>Pace calculator</h4>
+                    <label class="form-field">Solve for<select id="pace-solve-for"><option value="pace">Pace</option><option value="time">Time</option><option value="distance">Distance</option></select></label>
+                    <label class="form-field">Distance<div class="input-with-unit"><input id="pace-distance" type="number" min="0" step="any" inputmode="decimal" placeholder="0.00" /><span data-distance-unit>mi</span></div></label>
+                    <label class="form-field">Time<input id="pace-time" type="text" inputmode="numeric" placeholder="45:00" /></label>
+                    <label class="form-field">Pace<input id="pace-pace" type="text" inputmode="numeric" placeholder="8:30" /></label>
+                    <button class="btn btn-primary" type="submit"><i data-lucide="calculator"></i>Calculate</button>
+                    <div id="pace-calculator-result" class="calculator-result">Enter any two values.</div>
+                  </form>
+                  <form id="race-predictor-form" class="calculator-box" novalidate>
+                    <h4>Race predictor</h4>
+                    <label class="form-field">Recent saved run<select id="race-source-run"><option value="">Manual result</option></select></label>
+                    <label class="form-field">Result distance<div class="input-with-unit"><input id="race-distance" type="number" min="0" step="any" inputmode="decimal" placeholder="0.00" /><span data-distance-unit>mi</span></div></label>
+                    <label class="form-field">Result time<input id="race-time" type="text" inputmode="numeric" placeholder="50:00" /></label>
+                    <button class="btn btn-primary" type="submit"><i data-lucide="sparkles"></i>Predict</button>
+                    <div id="race-predictions" class="race-predictions"></div>
+                  </form>
+                </div>
+              </article>
+            </div>
+            <aside class="training-side">
+              <article class="panel coach-panel">
+                <div class="panel-heading"><div><p class="eyebrow">COACH</p><h3>Smart signals</h3></div><span class="panel-note">Deterministic</span></div>
+                <div id="coach-insights" class="coach-insights"></div>
+              </article>
+              <article class="panel upcoming-panel">
+                <div class="panel-heading"><div><p class="eyebrow">NEXT UP</p><h3>Upcoming workout</h3></div></div>
+                <div id="next-workout-card" class="next-workout-card"></div>
+              </article>
             </aside>
           </div>
         </section>
@@ -288,6 +365,7 @@
           <div class="friends-layout">
             <div>
               <article class="panel find-runners-panel"><div class="panel-heading"><div><p class="eyebrow">FIND RUNNERS</p><h3>Grow your circle</h3></div></div><div class="friend-search-row"><label class="search-field"><i data-lucide="search"></i><input id="friend-search" type="search" placeholder="Search by name or email" /></label><button id="friend-search-btn" class="btn btn-primary" type="button">Search</button></div><div id="friend-search-results" class="friend-search-results"></div></article>
+              <article class="panel leaderboard-panel"><div class="panel-heading"><div><p class="eyebrow">THIS WEEK</p><h3>Friends leaderboard</h3></div><span class="panel-note">Accepted friends</span></div><div id="friends-leaderboard" class="friends-leaderboard"></div></article>
               <article class="panel friends-panel"><div class="panel-heading"><div><p class="eyebrow">YOUR FRIENDS</p><h3>On the road with you</h3></div><span id="friends-count" class="panel-note">0 friends</span></div><div id="friends-list" class="friends-list"></div></article>
             </div>
             <aside>
@@ -351,6 +429,37 @@
   <div id="password-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
     <div class="modal-backdrop" data-close-modal="password-modal"></div>
     <article class="modal-card compact-modal"><button class="icon-btn modal-close" type="button" data-close-modal="password-modal" aria-label="Close"><i data-lucide="x"></i></button><h3 id="password-modal-title">Change password</h3><form id="password-form" class="profile-edit-form"><label class="form-field">New password<input id="new-password" type="password" minlength="8" required /></label><div class="modal-actions"><button class="btn btn-ghost" type="button" data-close-modal="password-modal">Cancel</button><button class="btn btn-primary" type="submit">Update password</button></div></form></article>
+  </div>
+
+  <!-- Planned workout modal -->
+  <div id="workout-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workout-modal-title">
+    <div class="modal-backdrop" data-close-modal="workout-modal"></div>
+    <article class="modal-card workout-modal-card">
+      <button class="icon-btn modal-close" type="button" data-close-modal="workout-modal" aria-label="Close"><i data-lucide="x"></i></button>
+      <h3 id="workout-modal-title">Plan workout</h3>
+      <form id="workout-form" class="profile-edit-form" novalidate>
+        <input id="workout-id" type="hidden" />
+        <div class="form-grid two">
+          <label class="form-field">Date<input id="workout-date" type="date" required /></label>
+          <label class="form-field">Run type<select id="workout-type"><option value="Easy">Easy</option><option value="Recovery">Recovery</option><option value="Long Run">Long Run</option><option value="Tempo">Tempo</option><option value="Intervals">Intervals</option><option value="Race">Race</option><option value="Trail">Trail</option><option value="Other">Other</option></select></label>
+        </div>
+        <label class="form-field">Title<input id="workout-title" type="text" maxlength="80" placeholder="Easy aerobic run" required /></label>
+        <div class="form-grid two">
+          <label class="form-field">Target distance<div class="input-with-unit"><input id="workout-distance" type="number" min="0" step="any" inputmode="decimal" placeholder="0.00" /><span data-distance-unit>mi</span></div></label>
+          <label class="form-field">Target pace <span class="optional-label">optional</span><input id="workout-pace" type="text" inputmode="numeric" placeholder="8:30" /></label>
+        </div>
+        <label class="toggle-row workout-interval-toggle"><div><strong>Structured interval workout</strong><p>Add warm-up, repeats, recoveries, and cooldown.</p></div><input id="workout-has-interval" type="checkbox" /><span class="toggle-ui"></span></label>
+        <div id="workout-interval-fields" class="form-grid interval-grid hidden">
+          <label class="form-field">Warm-up<input id="workout-warmup" type="text" inputmode="numeric" placeholder="10:00" /></label>
+          <label class="form-field">Repetitions<input id="workout-reps" type="number" min="1" step="1" value="6" /></label>
+          <label class="form-field">Work<input id="workout-work" type="text" inputmode="numeric" placeholder="1:30" /></label>
+          <label class="form-field">Recovery<input id="workout-recovery" type="text" inputmode="numeric" placeholder="1:30" /></label>
+          <label class="form-field">Cooldown<input id="workout-cooldown" type="text" inputmode="numeric" placeholder="10:00" /></label>
+        </div>
+        <label class="form-field">Notes <span class="optional-label">optional</span><textarea id="workout-notes" rows="3" maxlength="700" placeholder="Keep it conversational."></textarea></label>
+        <div class="modal-actions"><button class="btn btn-ghost" type="button" data-close-modal="workout-modal">Cancel</button><button class="btn btn-primary" type="submit"><i data-lucide="save"></i>Save workout</button></div>
+      </form>
+    </article>
   </div>
 
   <script type="module" src="script.js"></script>
