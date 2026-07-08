@@ -62,6 +62,7 @@
             <label>Email<input id="sign-in-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required /></label>
             <label>Password<input id="sign-in-password" name="password" type="password" placeholder="Your password" autocomplete="current-password" required /></label>
             <button class="btn btn-primary btn-full" type="submit"><span>Sign in</span><i data-lucide="arrow-right"></i></button>
+            <button id="forgot-password-btn" class="text-button auth-inline-link" type="button">Forgot password?</button>
           </form>
 
           <form id="register-form" class="auth-form hidden" novalidate>
@@ -71,9 +72,20 @@
             <button class="btn btn-primary btn-full" type="submit"><span>Create my account</span><i data-lucide="arrow-right"></i></button>
           </form>
 
+          <form id="reset-request-form" class="auth-form hidden" novalidate>
+            <label>Email<input id="reset-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required /></label>
+            <button class="btn btn-primary btn-full" type="submit"><span>Send reset email</span><i data-lucide="mail"></i></button>
+          </form>
+
+          <form id="reset-password-form" class="auth-form hidden" novalidate>
+            <label>New password<input id="reset-new-password" name="new-password" type="password" placeholder="At least 8 characters" autocomplete="new-password" minlength="8" required /></label>
+            <label>Confirm new password<input id="reset-confirm-password" name="confirm-password" type="password" placeholder="Type it again" autocomplete="new-password" minlength="8" required /></label>
+            <button class="btn btn-primary btn-full" type="submit"><span>Update password</span><i data-lucide="check"></i></button>
+          </form>
+
           <button id="auth-switch" class="text-button auth-switch" type="button">New here? <strong>Create an account</strong></button>
           <p id="auth-message" class="auth-message" role="status"></p>
-          <p class="auth-footnote">Use the same email you registered with. New accounts may need email confirmation before sign-in.</p>
+          <p class="auth-footnote">Use the same email you registered with. Password reset links open this page so you can choose a new password securely.</p>
         </div>
       </div>
     </div>

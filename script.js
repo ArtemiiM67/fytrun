@@ -352,13 +352,46 @@ function setAuthMessage(message = '', isError = true) {
 }
 
 function showAuthMode(mode = 'signin') {
-  const registering = mode === 'register';
-  $('#register-form').classList.toggle('hidden', !registering);
-  $('#sign-in-form').classList.toggle('hidden', registering);
-  $('#auth-title').textContent = registering ? 'Create your account' : 'Welcome back';
-  $('#auth-subtitle').textContent = registering ? 'Start with your name, email, and a secure password.' : 'Sign in to view your runs, goals, and training plan.';
-  $('#auth-switch').innerHTML = registering ? 'Already have an account? <strong>Sign in</strong>' : 'New here? <strong>Create an account</strong>';
+  const forms = {
+    signin: $('#sign-in-form'),
+    register: $('#register-form'),
+    resetRequest: $('#reset-request-form'),
+    resetPassword: $('#reset-password-form'),
+  };
+  Object.entries(forms).forEach(([key, form]) => form?.classList.toggle('hidden', key !== mode));
+
+  const copy = {
+    signin: ['Welcome back', 'Sign in to view your runs, goals, and training plan.', 'New here? <strong>Create an account</strong>'],
+    register: ['Create your account', 'Start with your name, email, and a secure password.', 'Already have an account? <strong>Sign in</strong>'],
+    resetRequest: ['Reset your password', 'Enter your account email and FytRun will send you a secure reset link.', 'Remembered it? <strong>Sign in</strong>'],
+    resetPassword: ['Choose a new password', 'Enter your new password twice to finish the reset.', 'Back to <strong>sign in</strong>'],
+  }[mode] || copy.signin;
+
+  $('#auth-title').textContent = copy[0];
+  $('#auth-subtitle').textContent = copy[1];
+  $('#auth-switch').innerHTML = copy[2];
+  $('#auth-switch').dataset.authMode = mode;
   setAuthMessage('');
+}
+
+function isPasswordRecoveryUrl() {
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const query = new URLSearchParams(window.location.search);
+  return hash.get('type') === 'recovery' || query.get('type') === 'recovery';
+}
+
+function cleanAuthUrl() {
+  if (window.location.hash || window.location.search) {
+    window.history.replaceState(null, '', `${window.location.origin}${window.location.pathname}`);
+  }
+}
+
+function showPasswordResetReady() {
+  $('#app-shell').classList.add('hidden');
+  $('#auth-screen').classList.remove('hidden');
+  document.body.classList.remove('app-active');
+  showAuthMode('resetPassword');
+  cleanAuthUrl();
 }
 
 function showConfigurationMessage() {
@@ -366,6 +399,8 @@ function showConfigurationMessage() {
   $('#auth-subtitle').textContent = 'Add your Supabase URL and publishable key in script.js to activate cloud accounts and permanent data.';
   $('#sign-in-form').classList.add('hidden');
   $('#register-form').classList.add('hidden');
+  $('#reset-request-form')?.classList.add('hidden');
+  $('#reset-password-form')?.classList.add('hidden');
   $('#auth-switch').classList.add('hidden');
   setAuthMessage('Your frontend is ready. Finish the two-minute Supabase setup in the included README.', false);
 }
@@ -380,15 +415,24 @@ async function boot() {
   $('#run-date').value = todayISO();
   if (!isConfigured) { showConfigurationMessage(); return; }
 
+  const recoveryUrl = isPasswordRecoveryUrl();
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error) showToast('Session check failed', error.message, 'error');
-  if (session?.user) await enterApp(session.user);
-  else showAuth();
 
   supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'PASSWORD_RECOVERY') { showPasswordResetReady(); return; }
     if (event === 'SIGNED_OUT') { exitApp(); return; }
     if (session?.user && !state.user) await enterApp(session.user);
   });
+
+  if (recoveryUrl) {
+    if (session?.user) showPasswordResetReady();
+    else { showAuth(); showAuthMode('resetRequest'); setAuthMessage('This reset link is invalid or expired. Enter your email to request a fresh one.'); cleanAuthUrl(); }
+    return;
+  }
+
+  if (session?.user) await enterApp(session.user);
+  else showAuth();
 }
 
 function showAuth() {
@@ -1452,6 +1496,46 @@ async function handleAuthSubmit(event, mode) {
   } finally { button.disabled = false; }
 }
 
+async function handlePasswordResetRequest(event) {
+  event.preventDefault();
+  if (!isConfigured) return;
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  setAuthMessage('');
+  try {
+    const email = $('#reset-email').value.trim();
+    if (!email) throw new Error('Enter the email connected to your FytRun account.');
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) throw error;
+    setAuthMessage('Check your email. Open the reset link, then enter your new password here.', false);
+  } catch (error) {
+    setAuthMessage(error.message || 'Could not send the password reset email.');
+  } finally { button.disabled = false; }
+}
+
+async function handlePasswordResetUpdate(event) {
+  event.preventDefault();
+  if (!isConfigured) return;
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  setAuthMessage('');
+  try {
+    const password = $('#reset-new-password').value;
+    const confirm = $('#reset-confirm-password').value;
+    if (password.length < 8) throw new Error('Use at least 8 characters.');
+    if (password !== confirm) throw new Error('The two passwords do not match.');
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    $('#reset-password-form').reset();
+    await supabase.auth.signOut();
+    showAuthMode('signin');
+    setAuthMessage('Password updated. Sign in with your new password.', false);
+  } catch (error) {
+    setAuthMessage(error.message || 'Could not update your password.');
+  } finally { button.disabled = false; }
+}
+
 async function handleRunSubmit(event) {
   event.preventDefault();
   const distance = Number($('#run-distance').value);
@@ -2210,9 +2294,15 @@ function notifyStageChange(label) {
 function bindEvents() {
   $('#sign-in-form').addEventListener('submit', event => handleAuthSubmit(event, 'signin'));
   $('#register-form').addEventListener('submit', event => handleAuthSubmit(event, 'register'));
+  $('#reset-request-form').addEventListener('submit', handlePasswordResetRequest);
+  $('#reset-password-form').addEventListener('submit', handlePasswordResetUpdate);
+  $('#forgot-password-btn').addEventListener('click', () => {
+    $('#reset-email').value = $('#sign-in-email').value.trim();
+    showAuthMode('resetRequest');
+  });
   $('#auth-switch').addEventListener('click', () => {
-    const registering = !$('#register-form').classList.contains('hidden');
-    showAuthMode(registering ? 'signin' : 'register');
+    const mode = $('#auth-switch').dataset.authMode || 'signin';
+    showAuthMode(mode === 'signin' ? 'register' : 'signin');
   });
   $('#run-form').addEventListener('submit', handleRunSubmit);
   // Preserve exact canonical values only until a field is actually edited.
